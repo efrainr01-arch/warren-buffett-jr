@@ -86,6 +86,28 @@ Para datos de mercado usa: **FMP (Financial Modeling Prep)**, **FinnHub**, **FRE
 - **Nunca** ejecutes trades ni movimientos de dinero: toda ejecución la hace Victor manualmente.
 - **Nunca** leas, imprimas ni commitees el contenido de `API/`.
 
+## Memoria del agente (protocolo obligatorio)
+
+La memoria vive en `Memoria/` (índice: `Memoria/MEMORIA.md`). El aprendizaje
+entre sesiones NO es automático — depende de este protocolo:
+
+**Antes de analizar un ticker:**
+1. Lee `Memoria/MEMORIA.md` y, si existe, `Memoria/tesis/<TICKER>.md`
+   (qué se dijo antes y qué ha pasado desde entonces).
+2. Lee `Memoria/calibracion.md`: si reporta sesgo medio > ±10%, decláralo
+   en el reporte y ajusta la confianza de los targets a la baja.
+
+**Después de analizar:**
+3. Escribe/actualiza `Memoria/tesis/<TICKER>.md`: fecha, puntaje, targets,
+   la tesis en 2-3 frases, y las condiciones que la invalidarían.
+4. Agrega/actualiza la línea del ticker en el índice de MEMORIA.md.
+5. Si el análisis contradice una tesis previa, registra la lección en
+   `Memoria/errores.md` (nunca borres la tesis vieja — corrígela encima).
+
+**Mensual** (o cuando Victor lo pida): correr `wbj track` para actualizar
+`calibracion.md` con el track record real. Las predicciones se guardan
+automáticamente (`Reportes/*/*/prediccion.json`) — nunca editarlas.
+
 ## Re-ejecución
 
 Recalcula el análisis ante: nuevo 10-K/10-Q, earnings, revisión material de estimados, financiamiento, adquisición, evento legal mayor, ruptura técnica confirmada o data vencida (stale-data threshold).

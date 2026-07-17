@@ -76,10 +76,17 @@ def _history(packet: dict) -> list[dict]:
 
 
 def analyze(ticker: str) -> dict:
+    from datetime import date
+
+    from wbj.memoria import save_prediction
+
     packet = _build_packet(ticker)
     result = _compute(packet)
     price = live_price(ticker, fmp_api_key=settings.fmp_api_key)
     targets = price_targets(packet, price)
+    # Seed agent memory: every web analysis also records its prediction.
+    save_prediction(settings.reports_dir, ticker, date.today(),
+                    result["scorecard"], targets)
     result["targets"] = targets
     result["narrative"] = narrative(packet, result["scorecard"], targets)
     result["history"] = _history(packet)

@@ -14,3 +14,8 @@ API/
 # Research outputs generados (regenerables) — no versionar
 Reportes/*
 !Reportes/.gitkeep
+
+# Memoria personal del agente (tesis y calibracion son del usuario)
+Memoria/tesis/*
+!Memoria/tesis/.gitkeep
+Memoria/calibracion.md

@@ -239,6 +239,9 @@ def compute(ticker: str) -> None:
 @app.command()
 def analyze(ticker: str) -> None:
     """Run the full MVP pipeline: fetch -> packet -> compute -> save report."""
+    from wbj.memoria import save_prediction
+    from wbj.targets import live_price, price_targets
+
     settings, _, _ = _providers()
     p = _build_packet(ticker)
     result = _compute(p)
@@ -246,6 +249,11 @@ def analyze(ticker: str) -> None:
     out = _out_dir(settings, ticker)
     (out / "packet.json").write_text(json.dumps(p, indent=2))
     (out / "scores.json").write_text(json.dumps(result, indent=2))
+    # Seed the agent's memory: persist today's prediction for `wbj track`.
+    targets = price_targets(p, live_price(ticker, fmp_api_key=settings.fmp_api_key))
+    if save_prediction(settings.reports_dir, ticker, date.today(),
+                       result["scorecard"], targets):
+        typer.echo("prediccion.json guardada (memoria del agente)")
 
     m, cat = result["metrics"], result["scores"]["category"]
     typer.echo(f"\n=== {result['entity']} ({result['ticker']}) — FY end {result['fiscal_year_end']} ===")
@@ -282,6 +290,29 @@ def scorecard(ticker: str) -> None:
             typer.echo(f"{row['label']:<28} {'·' * 10}  N/S — {row['reason']}")
     typer.echo(f"\nOverall (quick): {sc['overall_10']}/10 on {sc['evidence_points_covered']}/100 evidence pts")
     typer.echo(f"Saved: {out}/scorecard.json")
+
+
+@app.command()
+def track() -> None:
+    """Evaluate every saved prediction vs today's prices (agent memory)."""
+    from wbj.memoria import track as run_track
+    from wbj.targets import live_price
+
+    settings, _, _ = _providers()
+    memoria_dir = settings.repo_root / "Memoria"
+    s = run_track(settings.reports_dir, memoria_dir,
+                  lambda t: live_price(t, fmp_api_key=settings.fmp_api_key),
+                  today=date.today())
+    typer.echo(f"\n=== Track record al {s['as_of']} ===")
+    typer.echo(f"Predicciones: {s['total']} ({s['maduras']} maduras >=12m)")
+    if s["hit_rate"] is not None:
+        typer.echo(f"Acierto en rango Bear-Bull: {s['hit_rate']:.0%}")
+    if s["sesgo_medio"] is not None:
+        typer.echo(f"Sesgo medio vs escenario Medio: {s['sesgo_medio']:+.1%}")
+    for r in s["rows"]:
+        typer.echo(f"  {r['ticker']:<6} {r['date']}  {r['change']:+.1%} real "
+                   f"vs {r['base_prorated']:+.1%} esperado  -> {r['outcome']}")
+    typer.echo(f"\nReporte escrito en {memoria_dir / 'calibracion.md'}")
 
 
 @app.command()
