@@ -101,6 +101,41 @@
             }
           ]
         }
+      },
+      "DebtCurrent": {
+        "label": "Debt, Current",
+        "description": "Amount of debt classified as current, due within one year or the normal operating cycle, if longer.",
+        "units": {
+          "USD": [
+            {
+              "end": "2025-01-26",
+              "val": 1250000000,
+              "accn": "0001045810-25-000023",
+              "fy": 2024,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2025-02-26"
+            }
+          ]
+        }
+      },
+      "WeightedAverageNumberOfDilutedSharesOutstanding": {
+        "label": "Weighted Average Number of Diluted Shares Outstanding",
+        "description": "The average number of shares issued and outstanding that are used in calculating diluted EPS, determined based on the timing of issuance of shares in the period.",
+        "units": {
+          "shares": [
+            {
+              "start": "2024-01-29",
+              "end": "2025-01-26",
+              "val": 24700000000,
+              "accn": "0001045810-25-000023",
+              "fy": 2024,
+              "fp": "FY",
+              "form": "10-K",
+              "filed": "2025-02-26"
+            }
+          ]
+        }
       }
     }
   }
