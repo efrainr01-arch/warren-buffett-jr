@@ -1,0 +1,22 @@
+name: Pre-Market Movers Email
+
+on:
+  schedule:
+    # 8:00 AM ET = 12:00 UTC (verano/EDT) o 13:00 UTC (invierno/EST).
+    # Corren ambos; el script verifica la hora ET y solo envía a las 8.
+    - cron: "0 12 * * 1-5"
+    - cron: "0 13 * * 1-5"
+  workflow_dispatch: # botón "Run workflow" para probar manualmente
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Send pre-market movers email
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          # En corrida manual, salta el chequeo de hora/feriado:
+          FORCE: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
+        run: python3 scripts/premarket_email.py
