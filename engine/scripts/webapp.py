@@ -224,17 +224,40 @@ PAGE = """<!doctype html>
     border-top-color:var(--purple); border-radius:50%; animation:r .7s linear infinite;
     vertical-align:-2px; margin-right:7px; }
   @keyframes r { to { transform:rotate(360deg); } }
-</style></head><body><div class="wrap">
-  <div class="kicker">Warren Buffett Jr · Motor de Análisis · SEC EDGAR en vivo</div>
-  <h1>Busca una empresa</h1>
-  <div class="topbar">
-    <div class="searchbox">
-      <input id="q" placeholder="Escribe un ticker o nombre — ej. NFLX, Disney, Coca-Cola…"
-        autocomplete="off" autofocus>
-      <div class="sugg" id="sugg"></div>
+  /* --- Estados de la app: landing (bienvenida centrada) vs results --- */
+  .hero { transition: all .38s cubic-bezier(.4,0,.2,1); }
+  .subtitle { font-size:17px; color:var(--ink2); margin:2px 0 0; letter-spacing:-.01em; }
+  #brand { cursor:default; }
+  /* Landing: bloque de bienvenida centrado en la ventana */
+  .app.landing { min-height:calc(100vh - 96px); display:flex; flex-direction:column;
+    justify-content:center; }
+  .app.landing .hero { text-align:center; }
+  .app.landing .kicker { text-align:center; margin-bottom:10px; }
+  .app.landing #brand { font-size:44px; margin-bottom:2px; letter-spacing:-.03em; }
+  .app.landing .subtitle { font-size:19px; margin-bottom:8px; }
+  .app.landing .topbar { margin:26px auto 0; justify-content:center; }
+  .app.landing .foot { display:none; }
+  /* Results: encabezado colapsado a una barra superior compacta */
+  .app.results .kicker, .app.results .subtitle { display:none; }
+  .app.results .hero { display:flex; align-items:center; gap:20px; margin-bottom:6px; }
+  .app.results #brand { font-size:20px; margin-bottom:0; white-space:nowrap; cursor:pointer;
+    color:var(--purple); }
+  .app.results #brand:hover { filter:brightness(1.1); }
+  .app.results .topbar { flex:1; margin:0; }
+</style></head><body><div class="app landing" id="app"><div class="wrap">
+  <header class="hero">
+    <div class="kicker">Warren Buffett Jr · Motor de Análisis · SEC EDGAR en vivo</div>
+    <h1 id="brand">Bienvenido a Warren Buffett Jr</h1>
+    <p class="subtitle">Tu Especialista Financiero</p>
+    <div class="topbar">
+      <div class="searchbox">
+        <input id="q" placeholder="Escribe un ticker o nombre — ej. NFLX, Disney, Coca-Cola…"
+          autocomplete="off" autofocus>
+        <div class="sugg" id="sugg"></div>
+      </div>
+      <button class="discover" id="discoverBtn">✨ Descubrir empresas</button>
     </div>
-    <button class="discover" id="discoverBtn">✨ Descubrir empresas</button>
-  </div>
+  </header>
   <div id="status"></div>
   <div class="card" id="screenCard" style="display:none;margin-top:22px"></div>
   <div class="grid" id="grid">
@@ -248,11 +271,27 @@ PAGE = """<!doctype html>
   Sin evidencia no hay número: las categorías pendientes se muestran como N/S, nunca se inventan.
   Los targets son rangos de referencia con supuestos declarados — clasificación de research,
   no es asesoría de inversión.</div>
-</div>
+</div></div>
 <script>
 const q = document.getElementById('q'), sugg = document.getElementById('sugg'),
-      status = document.getElementById('status'), grid = document.getElementById('grid');
+      status = document.getElementById('status'), grid = document.getElementById('grid'),
+      app = document.getElementById('app'), brand = document.getElementById('brand');
 let timer = null;
+
+function setMode(mode) {
+  const landing = mode === 'landing';
+  app.classList.toggle('landing', landing);
+  app.classList.toggle('results', !landing);
+  brand.textContent = landing ? 'Bienvenido a Warren Buffett Jr' : 'Warren Buffett Jr';
+}
+
+// Clic en el título (en modo resultados) regresa a la bienvenida centrada.
+brand.addEventListener('click', () => {
+  if (!app.classList.contains('results')) return;
+  grid.style.display = 'none'; screenCard.style.display = 'none';
+  status.textContent = ''; q.value = ''; sugg.style.display = 'none';
+  setMode('landing'); q.focus();
+});
 
 q.addEventListener('input', () => {
   clearTimeout(timer);
@@ -474,6 +513,7 @@ function setPeriod(p) {
 
 const screenCard = document.getElementById('screenCard');
 document.getElementById('discoverBtn').addEventListener('click', async () => {
+  setMode('results');
   grid.style.display = 'none'; screenCard.style.display = 'none';
   status.innerHTML = `<span class="spin"></span>Escaneando todo el universo de la SEC:
     empresas medianas ($0.8B–$30B), rentables y creciendo… la primera vez tarda 1–2 min.`;
@@ -512,6 +552,7 @@ document.getElementById('discoverBtn').addEventListener('click', async () => {
 
 async function run(t) {
   if (!t) return;
+  setMode('results');
   sugg.style.display = 'none'; grid.style.display = 'none';
   q.value = t;
   status.innerHTML = `<span class="spin"></span>Leyendo reportes de la SEC y calculando <b>${t}</b>…`;
