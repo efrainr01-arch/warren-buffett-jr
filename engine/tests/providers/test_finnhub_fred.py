@@ -307,3 +307,58 @@ def test_fred_risk_free_rate_empty_observations_returns_null(tmp_path):
 
     assert result.is_null
     assert result.state == NullState.MISSING
+
+
+# =============================================================================
+# max_age_days per method (freshness policy)
+# =============================================================================
+
+
+def _spy_get_json(provider, recorded):
+    """Wrap provider.get_json to record the max_age_days each call passes."""
+    original = provider.get_json
+
+    def spy(url, params, cache_key, ticker, max_age_days=None, headers=None):
+        recorded[cache_key] = max_age_days
+        return original(
+            url, params, cache_key, ticker, max_age_days=max_age_days, headers=headers
+        )
+
+    provider.get_json = spy
+
+
+def test_finnhub_max_age_days_per_method(tmp_path):
+    """Quote must refetch daily (1); estimates/calendar weekly (7). A
+    copy-paste swap of these constants must fail this test."""
+
+    def handler(request):
+        return httpx.Response(200, json={})
+
+    p = _make_finnhub(tmp_path, handler)
+    recorded = {}
+    _spy_get_json(p, recorded)
+
+    p.quote("NVDA")
+    p.estimates("NVDA")
+    p.revenue_estimates("NVDA")
+    p.earnings_calendar("NVDA")
+
+    assert recorded == {
+        "quote": 1,
+        "estimates": 7,
+        "revenue_estimates": 7,
+        "earnings_calendar": 7,
+    }
+
+
+def test_fred_series_max_age_days_is_1(tmp_path):
+    def handler(request):
+        return httpx.Response(200, json=_load_fixture("fred", "dgs10"))
+
+    p = _make_fred(tmp_path, handler)
+    recorded = {}
+    _spy_get_json(p, recorded)
+
+    p.series("DGS10")
+
+    assert recorded == {"fred_DGS10": 1}
