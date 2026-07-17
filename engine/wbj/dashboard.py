@@ -64,14 +64,16 @@ def _watch_items(output) -> list[str]:
 
 
 def build_dashboard(packet: Packet, targets: dict | None = None,
-                    overlay=None) -> dict:
+                    overlay=None, judge: bool = False, settings=None) -> dict:
     """Run the 6 specialists over `packet` and assemble the health view.
 
-    `overlay` (optional): merged judgment answers from a Claude sub-agent,
-    which raise coverage on the qualitative metrics. `targets`: the
-    Bull/Base/Bear dict from wbj.targets (shown as-is).
+    `overlay` (optional): pre-computed judgment answers to merge.
+    `judge` (optional): when True, calls the Claude judgment agent to answer
+    the specialists' open qualitative questions and merges the result —
+    this is what fills Business/Market/Risk coverage. Needs an
+    ANTHROPIC_API_KEY (via `settings`). `targets`: the Bull/Base/Bear dict.
     """
-    from wbj.overlay.merge import merge_overlay
+    from wbj.overlay.merge import collect_requests, merge_overlay
 
     areas = []
     scored_pts = 0.0
@@ -89,6 +91,16 @@ def build_dashboard(packet: Packet, targets: dict | None = None,
             })
             continue
         outputs.append(out)
+
+    # Qualitative judgment: let Claude answer the open questions the code
+    # can't score (moat, catalysts, concentration...), then merge.
+    if judge and settings is not None and getattr(settings, "anthropic_api_key", None):
+        from wbj.judge import answer_judgments
+
+        reqs = collect_requests(outputs)
+        judgments = answer_judgments(packet, reqs, settings)
+        if judgments:
+            overlay = (overlay or []) + judgments
 
     if overlay:
         outputs = merge_overlay(outputs, overlay)
