@@ -74,6 +74,7 @@ from typing import Any, Sequence
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
 
+from wbj.core.confidence import confidence as _confidence_formula
 from wbj.core.formulas import cagr, register_formula, yoy
 from wbj.core.nullstates import EvidenceClass, NullState, Value
 from wbj.core.scoring import Category, Dimension
@@ -96,6 +97,9 @@ __all__ = [
     "Core27Summary",
     "FinancialOutput",
     "band_score",
+    "core27_diagnostic",
+    "capped_verdict",
+    "verdict",
     "run",
     # formula functions (Value-returning, direct-callable, VALIDATION_TESTS-facing)
     "yoy_revenue_growth",
@@ -160,6 +164,26 @@ assert len(CORE_27_IDS) == 27
 # Dimension membership (SCORING.md "Primary inputs"). FIN-CF-015 legitimately
 # appears in both EPS_FCF and RETURNS (SCORING.md lists it under both
 # dimensions' primary inputs) -- the core-27 diagnostic still counts it once.
+#
+# SCORING.md lists two dimensions with a trailing "+ <extra>" input beyond
+# their numbered core metrics:
+#   - RETURNS: "FIN-CF-015 and FIN-EF-023..027 + dilution" -> the dilution
+#     diagnostics FIN-DX-032 (SBC/revenue) and FIN-DX-033 (diluted-share
+#     CAGR) are included here and scored (see `band_sbc_to_revenue` /
+#     `band_diluted_share_cagr`). SCORING.md's own dimension rule names
+#     "heavy dilution" as a 0-3 (BAD) signal, so they must carry weight.
+#   - BALANCE: "FIN-BS-017..022 + diagnostics" -> the balance diagnostics
+#     FIN-DX-028 (net-debt/EBITDA) and FIN-DX-029 (debt/FCF) are
+#     deliberately NOT added as scored members. FORMULAS.md itself labels
+#     FIN-DX-028 "Diagnostic and risk-agent input" (it primarily feeds the
+#     risk specialist, Task 18) and both are frequently NOT_MEANINGFUL /
+#     unavailable from this packet's field set (no D&A field -> no EBITDA);
+#     folding an always-MISSING metric into the weighted score would only
+#     depress the balance dimension's coverage without adding signal. They
+#     remain computed and reported (in `balance_and_maturities`), just not
+#     as weighted dimension inputs -- documented here rather than silently.
+# Diagnostics stay `core27=False`: including a dilution metric in a
+# dimension does NOT add it to the 27-metric core diagnostic count.
 _DIMENSION_MEMBERS: dict[str, tuple[str, ...]] = {
     DIM_REVENUE: ("FIN-GR-001", "FIN-GR-002", "FIN-GR-003", "FIN-GR-004", "FIN-GR-005"),
     DIM_EPS_FCF: (
@@ -168,7 +192,10 @@ _DIMENSION_MEMBERS: dict[str, tuple[str, ...]] = {
     ),
     DIM_MARGINS: ("FIN-PR-007", "FIN-PR-008", "FIN-PR-009", "FIN-PR-010"),
     DIM_BALANCE: ("FIN-BS-017", "FIN-BS-018", "FIN-BS-019", "FIN-BS-020", "FIN-BS-021", "FIN-BS-022"),
-    DIM_RETURNS: ("FIN-CF-015", "FIN-EF-023", "FIN-EF-024", "FIN-EF-025", "FIN-EF-026", "FIN-EF-027"),
+    DIM_RETURNS: (
+        "FIN-CF-015", "FIN-EF-023", "FIN-EF-024", "FIN-EF-025", "FIN-EF-026", "FIN-EF-027",
+        "FIN-DX-032", "FIN-DX-033",
+    ),
 }
 
 
@@ -554,6 +581,42 @@ def verdict(score10: float) -> str:
     return "Weak / high financial risk"
 
 
+def capped_verdict(score10: float, *, override_1: bool, override_2: bool) -> str:
+    """The verdict label after applying DECISION_RULES.md's mandatory
+    overrides *to the label only* (never to `category.awarded_points` --
+    see the `SpecialistOutput.verdict` docstring and HANDOFF_CONTRACT.md).
+
+    Override 1 (loss + negative FCF + external dependence) caps the verdict
+    at Bad/Avoid (the weakest band); Override 2 (ROIC < WACC) caps it below
+    Excellent. Both are expressed as a ceiling on the score fed to
+    `verdict()`, so the label is degraded without moving any points.
+    """
+    effective = score10
+    if override_1:
+        effective = min(effective, 3.99)  # Bad/Avoid
+    if override_2:
+        effective = min(effective, 7.99)  # cannot be Excellent
+    return verdict(effective)
+
+
+def core27_diagnostic(bands: Sequence[int | None]) -> tuple[int, float, float, float, float]:
+    """The core-27 diagnostic (DECISION_RULES.md), as a pure function of the
+    27 core metrics' band points so it is directly testable and is the
+    single implementation `run()` calls.
+
+    `bands[i]` is that core metric's 0/1/2 band (BAD/GOOD/EXCELLENT), or
+    `None` when the metric is NOT_SCORABLE. Returns `(valid_count, points,
+    maximum_valid_points, percent, score_10)` where
+    `percent = points / (2 * valid_count) * 100` and
+    `score_10 = percent / 10` (both `0.0` when no metric is valid).
+    """
+    valid = [b for b in bands if b is not None]
+    points = float(sum(valid))
+    maximum_valid_points = float(2 * len(valid))
+    percent = (points / maximum_valid_points * 100.0) if valid else 0.0
+    return len(valid), points, maximum_valid_points, percent, percent / 10.0
+
+
 # ============================================================================
 # FIN-BS-017..022: Balance sheet and liquidity
 # ============================================================================
@@ -781,12 +844,31 @@ def sbc_to_revenue(sbc: float, revenue: float) -> Value:
     return _ok(sbc / revenue, unit="pct")
 
 
+def band_sbc_to_revenue(pct: float) -> int:
+    """FORMULAS.md gives FIN-DX-032 no numeric band (only "Report with
+    diluted-share CAGR"); dilution is a scored input of the RETURNS
+    dimension (SCORING.md, "+ dilution", "heavy dilution" -> BAD). This
+    module's reading (lower SBC drag is better): EXCELLENT <2% of revenue;
+    GOOD 2-10%; BAD >10%."""
+    return band_score(pct, 0.02, 0.10, higher_is_better=False)
+
+
 @register_formula(
     id="FIN-DX-033", version=_VERSION, unit="pct", inputs=["shares_end", "shares_begin", "years"],
 )
 def diluted_share_cagr(shares_end: float, shares_begin: float, years: float) -> Value:
     """Diluted-share CAGR (FIN-DX-033): positive is dilution (FORMULAS.md)."""
     return cagr(shares_end, shares_begin, years)
+
+
+def band_diluted_share_cagr(cagr_pct: float) -> int:
+    """FORMULAS.md gives FIN-DX-033 no numeric band ("Positive is dilution"
+    only). This module's reading (share-count shrinkage is best): EXCELLENT
+    <0%/year (net buybacks return capital); GOOD 0-2%/year (modest
+    dilution); BAD >2%/year (material dilution -- Task 15's business brief
+    independently anchors a >5% "DILUTION_RED_FLAG", so >2% BAD is the
+    stricter, still-defensible line for a *scored* input)."""
+    return band_score(cagr_pct, 0.0, 0.02, higher_is_better=False)
 
 
 # ============================================================================
@@ -1304,12 +1386,16 @@ def _compute_all(
     v = _null(NullState.MISSING, "days", "PAYABLES_FIELD_UNAVAILABLE")
     add("FIN-DX-031", v, None, (), core27=False)
 
+    # FIN-DX-032/033 (dilution) ARE scored -- SCORING.md names them a
+    # primary input of the RETURNS dimension ("+ dilution"). They stay
+    # core27=False (not part of the 27-metric diagnostic count) but carry a
+    # band so they contribute to the weighted dimension score.
     sbc_latest = _num(annual[-1], "stock_based_compensation") if annual else None
     if sbc_latest is not None and rev_latest not in (None, 0):
         v = sbc_to_revenue(sbc_latest, rev_latest)
     else:
         v = _null(NullState.MISSING, "pct", "SBC_TO_REVENUE_INPUTS_UNAVAILABLE")
-    add("FIN-DX-032", v, None, (), core27=False)
+    add("FIN-DX-032", v, _band_or_none(v, band_sbc_to_revenue), (DIM_RETURNS,), core27=False)
 
     diluted_hist = [_num(r, "diluted_shares") for r in annual]
     valid_diluted = [x for x in diluted_hist if x is not None]
@@ -1317,7 +1403,7 @@ def _compute_all(
         v = diluted_share_cagr(valid_diluted[-1], valid_diluted[0], len(valid_diluted) - 1)
     else:
         v = _null(NullState.MISSING, "pct", "DILUTED_SHARE_CAGR_INSUFFICIENT_HISTORY")
-    add("FIN-DX-033", v, None, (), core27=False)
+    add("FIN-DX-033", v, _band_or_none(v, band_diluted_share_cagr), (DIM_RETURNS,), core27=False)
 
     return results, assumptions, judgment_requests, ctx
 
@@ -1376,19 +1462,22 @@ def run(packet: Packet, overlay: dict[str, Any] | None = None) -> FinancialOutpu
                 metric_scores.append((weight, Value.null(NullState.NOT_SCORABLE, unit="score")))
         dimensions.append(Dimension(name=dim_name, max_points=3.0, metric_scores=metric_scores))
 
-    category = _category_from_dimensions(dimensions)
+    # ---- Category points/score_10 (ALWAYS reproducible from dimensions) ----
+    cat = Category(name=AGENT_ID, max_points=MAX_POINTS, dimensions=dimensions)
+    awarded_points = cat.points()
+    dim_score10 = cat.score10()
+    coverage = cat.coverage()
 
-    # ---- Core-27 diagnostic ----
+    # ---- Core-27 diagnostic (single implementation, shared with tests) ----
     core27_results = [r for r in results if r.core27]
     assert len(core27_results) == 27, f"expected 27 core metrics, got {len(core27_results)}"
     valid = [r for r in core27_results if r.band is not None]
-    points = float(sum(r.band for r in valid))
-    maximum_valid_points = float(2 * len(valid))
-    percent = (points / maximum_valid_points * 100.0) if valid else 0.0
-    core27_score10 = percent / 10.0
+    valid_count, points, maximum_valid_points, percent, core27_score10 = core27_diagnostic(
+        [r.band for r in core27_results]
+    )
     core27_rows = [row for row in rows if row.metric_id in {r.metric_id for r in core27_results}]
     core27 = Core27Summary(
-        valid_count=len(valid), points=points, maximum_valid_points=maximum_valid_points,
+        valid_count=valid_count, points=points, maximum_valid_points=maximum_valid_points,
         percent=percent, score_10=core27_score10, rows=core27_rows,
     )
 
@@ -1396,7 +1485,6 @@ def run(packet: Packet, overlay: dict[str, Any] | None = None) -> FinancialOutpu
     mandatory_overrides: list[str] = []
 
     # ---- Reconciliation (DECISION_RULES.md: >1.5-point gap requires an explanation) ----
-    dim_score10 = category.score_10 if category.score_10 is not None else 0.0
     recon_warning = reconciliation_check(dim_score10, core27_score10) if valid else None
     if recon_warning is not None:
         mandatory_flags.append(recon_warning)
@@ -1409,32 +1497,32 @@ def run(packet: Packet, overlay: dict[str, Any] | None = None) -> FinancialOutpu
     if "NEGATIVE_EQUITY_DEBT_TO_EQUITY_NOT_MEANINGFUL" in by_id["FIN-BS-019"].value.warnings:
         mandatory_flags.append("NEGATIVE_EQUITY_DEBT_TO_EQUITY_NOT_MEANINGFUL")
 
-    # ---- Override 1: loss + negative FCF + external dependence -> Bad/Avoid cap ----
+    # ---- Override 1: loss + negative FCF + external dependence -> Bad/Avoid ----
     override_1 = override_1_triggered(ctx["net_income"], ctx["fcf"], ctx["externally_dependent"])
     if override_1:
         mandatory_flags.append("OVERRIDE_1_LOSS_NEGATIVE_FCF_EXTERNAL_DEPENDENCE")
         mandatory_overrides.append("OVERRIDE_1_LOSS_NEGATIVE_FCF_EXTERNAL_DEPENDENCE_CAPS_BAD_AVOID")
 
-    # ---- Override 2: ROIC < WACC -> category cannot be Excellent ----
+    # ---- Override 2: ROIC < WACC -> cannot be Excellent ----
     override_2 = override_2_triggered(ctx["roic_value"], ctx["wacc_value"])
     if override_2:
         mandatory_flags.append("OVERRIDE_2_ROIC_BELOW_WACC")
         mandatory_overrides.append("OVERRIDE_2_ROIC_BELOW_WACC_CAPS_EXCELLENT")
 
-    # ---- Apply override caps (score_10 only; awarded_points follows) ----
-    category_raw = category  # dimension-derived category, before any override cap
-    score10 = category_raw.score_10 if category_raw.score_10 is not None else 0.0
-    if override_1:
-        score10 = min(score10, 3.99)
-    if override_2:
-        score10 = min(score10, 7.99)
-    if score10 != category_raw.score_10:
-        category = CategoryStats(
-            max_points=MAX_POINTS, awarded_points=score10 / 10.0 * MAX_POINTS,
-            score_10=score10, confidence=category_raw.confidence,
-        )
+    # ---- Overrides cap the VERDICT LABEL only; category points stay reproducible ----
+    # (HANDOFF_CONTRACT.md rejects a packet whose category points don't
+    # reproduce from dimension scores, with no exception for overrides --
+    # so the cap lives on `verdict`, not on `awarded_points`/`score_10`.)
+    label = capped_verdict(dim_score10, override_1=override_1, override_2=override_2)
 
-    coverage = _coverage_from_dimensions(dimensions)
+    # ---- Category confidence (Task 5 five-component formula) ----
+    category = CategoryStats(
+        max_points=MAX_POINTS,
+        awarded_points=awarded_points,
+        score_10=dim_score10,
+        confidence=_category_confidence(coverage, packet, reconciled=recon_warning is None),
+    )
+
     status = status_from_coverage(coverage)
 
     # ---- Extension field groupings ----
@@ -1455,16 +1543,17 @@ def run(packet: Packet, overlay: dict[str, Any] | None = None) -> FinancialOutpu
 
     # ---- Internal self-checks -> validation_tests summary ----
     # Mirrors HANDOFF_CONTRACT.md's handoff-rejection checklist at a small
-    # scale: does category math reproduce from dimensions (pre-override,
-    # since an override cap is an intentional, documented departure from
-    # the raw dimension math -- not a bug); does every row carry a formula
-    # id; is the knowledge timestamp present.
+    # scale: does category math reproduce from dimensions (always -- the
+    # override cap is on the verdict label, never on the points, so this
+    # check has no override exception); does every row carry a formula id;
+    # is the knowledge timestamp present; is confidence a real number.
     passed = 0
     failed = 0
     checks = [
-        abs((category_raw.awarded_points or 0.0) - (_category_from_dimensions(dimensions).awarded_points or 0.0)) < 1e-6,
+        abs((category.awarded_points or 0.0) - Category(name=AGENT_ID, max_points=MAX_POINTS, dimensions=dimensions).points()) < 1e-6,
         all(row.formula_id for row in rows),
         bool(packet.analysis.knowledge_timestamp),
+        category.confidence is not None,
     ]
     for ok in checks:
         passed += 1 if ok else 0
@@ -1481,6 +1570,7 @@ def run(packet: Packet, overlay: dict[str, Any] | None = None) -> FinancialOutpu
         ),
         knowledge_timestamp=packet.analysis.knowledge_timestamp,
         category=category,
+        verdict=label,
         coverage=coverage,
         dimensions=dimensions,
         metrics=rows,
@@ -1500,10 +1590,44 @@ def run(packet: Packet, overlay: dict[str, Any] | None = None) -> FinancialOutpu
     )
 
 
-def _category_from_dimensions(dimensions: list[Dimension]) -> CategoryStats:
-    cat = Category(name=AGENT_ID, max_points=MAX_POINTS, dimensions=dimensions)
-    return CategoryStats(max_points=MAX_POINTS, awarded_points=cat.points(), score_10=cat.score10(), confidence=None)
+def _category_confidence(coverage: float, packet: Packet, *, reconciled: bool) -> float:
+    """Category confidence (0-100) via `wbj.core.confidence.confidence()` —
+    the Task 5 five-component formula (`0.30*coverage + 0.25*source_quality
+    + 0.20*freshness + 0.15*consistency + 0.10*model_fit`).
 
+    HANDOFF_CONTRACT.md rejects a packet whose category confidence is
+    absent, so every `FinancialOutput` must carry a real number here. The
+    five components are derived from real packet signals; where the packet
+    doesn't supply a component directly, this module uses a documented
+    constant (flagged below). This mapping is this module's own dated
+    (2.0.0) construction, shared with Tasks 15-19 in spirit.
 
-def _coverage_from_dimensions(dimensions: list[Dimension]) -> float:
-    return Category(name=AGENT_ID, max_points=MAX_POINTS, dimensions=dimensions).coverage()
+    - coverage: the category's own `Category.coverage()`, rescaled 0-100.
+    - source_quality: 90 — `packet.fundamentals` are reported financial
+      statements from regulatory filings (EDGAR/FMP), the top of
+      `DATA_POLICY.md`'s source hierarchy. A constant (the packet doesn't
+      carry a per-source-quality score at this layer).
+    - freshness: 100 if `packet.staleness["quarterly_fundamentals"]` is
+      FRESH, else 50 — the financial specialist's inputs are the quarterly/
+      annual fundamentals, whose staleness the packet tracks directly
+      (`DATA_POLICY.md`: stale data lowers confidence, never the value).
+    - consistency: 90 if the core-27 diagnostic reconciled with the
+      weighted dimensions (within DECISION_RULES.md's 1.5-pt tolerance),
+      else 60 — a real, computed agreement signal.
+    - model_fit: 90 for `default_nonfinancial` (conventional formulas fit
+      an operating company), else 40 — a bank/insurer/REIT scored with
+      conventional (non-adapter) FCF/ROIC is a poor model fit (mandatory
+      override 5, not yet implemented; see module docstring).
+    """
+    coverage_component = max(0.0, min(1.0, coverage)) * 100.0
+    source_quality = 90.0
+    freshness = 100.0 if packet.staleness.get("quarterly_fundamentals", "FRESH") == "FRESH" else 50.0
+    consistency = 90.0 if reconciled else 60.0
+    model_fit = 90.0 if packet.analysis.industry_adapter == "default_nonfinancial" else 40.0
+    return _confidence_formula(
+        coverage=coverage_component,
+        source_quality=source_quality,
+        freshness=freshness,
+        consistency=consistency,
+        model_fit=model_fit,
+    )

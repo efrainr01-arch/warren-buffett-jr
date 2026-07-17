@@ -101,6 +101,14 @@ class MetricRow(BaseModel):
     Exactly one of `value`/`state` is set, mirroring `Value`. `score` is a
     0-10 float or the literal string `"NOT_SCORABLE"`, per
     OUTPUT_CONTRACT.md's `score: 0-10 or NOT_SCORABLE`.
+
+    `evidence_class` is `None` on a null row (`state` set, e.g.
+    MISSING/NOT_SCORABLE): a value that doesn't exist has no provenance
+    class to report, and `MetricRow.from_value` copies it straight from the
+    source `Value` (which is itself `None` for a null). Downstream
+    consumers (and Tasks 15-19) should read `evidence_class` as "the
+    provenance of this row's number, if it has one" and not expect an R/C/E/
+    A/Q on a MISSING/NOT_SCORABLE row.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -184,7 +192,18 @@ class SpecialistOutput(BaseModel):
     every `0N_*_analysis/OUTPUT_SCHEMA.md`'s common prefix). Each
     specialist's own output model subclasses this and adds its
     category-specific extension fields (e.g. `financial.py`'s
-    `core_27_metrics`)."""
+    `core_27_metrics`).
+
+    `verdict` is the category's qualitative label (e.g. financial's
+    "Excellent financial health" / ... / "Weak / high financial risk"
+    band). It is the ONLY place a mandatory override may cap the outcome:
+    `category.awarded_points`/`score_10` must always reproduce from
+    `dimensions` (HANDOFF_CONTRACT.md rejects a packet whose category
+    points don't, with no exception for overrides), so an override that
+    "caps the verdict at Bad/Avoid" or "prevents an Excellent verdict"
+    lowers this label (and records a `mandatory_flags` entry), never the
+    points. Tasks 15-19 must follow the same discipline.
+    """
 
     model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
 
@@ -194,6 +213,7 @@ class SpecialistOutput(BaseModel):
     security: SecurityRef
     knowledge_timestamp: str
     category: CategoryStats
+    verdict: str | None = None
     coverage: float | None = None
     dimensions: list[Dimension] = Field(default_factory=list)
     metrics: list[MetricRow] = Field(default_factory=list)

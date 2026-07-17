@@ -175,22 +175,48 @@ def test_FIN_T006_loss_negative_fcf_equity_issuance_triggers_override_1():
 
 
 def test_FIN_T007_roic_below_wacc_no_excellent_verdict():
-    """ROIC=9%, WACC=11% -> No Excellent verdict."""
+    """ROIC=9%, WACC=11% -> No Excellent verdict.
+
+    Exercises the real verdict cap (`capped_verdict`): even a 9.5/10 raw
+    score cannot yield an 'Excellent' label once Override 2 (ROIC<WACC)
+    fires -- and the same raw score IS 'Excellent' without the override.
+    """
     assert fin.override_2_triggered(roic_value=0.09, wacc_value=0.11) is True
-    # capping mirrors run()'s "min(score10, 7.99)" -- 9.5 would otherwise be Excellent
-    capped = min(9.5, 7.99) if fin.override_2_triggered(0.09, 0.11) else 9.5
-    assert fin.verdict(capped) != "Excellent financial health"
+    assert fin.capped_verdict(9.5, override_1=False, override_2=True) != "Excellent financial health"
+    assert fin.capped_verdict(9.5, override_1=False, override_2=False) == "Excellent financial health"
 
 
 def test_FIN_T008_27_valid_metrics_all_excellent_is_100pct():
-    """27 valid metrics all Excellent -> 54/54=100%."""
-    points = sum(2 for _ in range(27))  # EXCELLENT = 2 points each
-    maximum_valid_points = 2 * 27
-    assert points == 54
-    assert maximum_valid_points == 54
-    percent = points / maximum_valid_points * 100.0
+    """27 valid metrics all Excellent -> 54/54=100%, run through the real
+    core-27 diagnostic (`core27_diagnostic`), not inline test arithmetic."""
+    valid_count, points, maximum_valid_points, percent, score_10 = fin.core27_diagnostic([2] * 27)
+    assert valid_count == 27
+    assert points == 54.0
+    assert maximum_valid_points == 54.0
     assert percent == pytest.approx(100.0)
-    assert percent / 10.0 == pytest.approx(10.0)
+    assert score_10 == pytest.approx(10.0)
+
+
+def test_core27_diagnostic_excludes_not_scorable_metrics():
+    """A `None` band (NOT_SCORABLE) is excluded from both the numerator and
+    the `2*valid` denominator -- 26 EXCELLENT + 1 NOT_SCORABLE still reads
+    100% over the 26 valid metrics."""
+    valid_count, points, maximum_valid_points, percent, score_10 = fin.core27_diagnostic([2] * 26 + [None])
+    assert valid_count == 26
+    assert points == 52.0
+    assert maximum_valid_points == 52.0
+    assert percent == pytest.approx(100.0)
+
+
+def test_core27_diagnostic_mixed_bands():
+    # 4 EXCELLENT(2) + 4 GOOD(1) + 2 BAD(0) -> 12 / 20 = 60%
+    valid_count, points, maximum_valid_points, percent, score_10 = fin.core27_diagnostic(
+        [2, 2, 2, 2, 1, 1, 1, 1, 0, 0]
+    )
+    assert valid_count == 10
+    assert points == 12.0
+    assert percent == pytest.approx(60.0)
+    assert score_10 == pytest.approx(6.0)
 
 
 def test_FIN_T009_negative_equity_debt_to_equity_not_meaningful():
@@ -297,13 +323,21 @@ def test_run_override_1_caps_score_below_4():
     out = fin.run(_minimal_packet(rows))
     assert "OVERRIDE_1_LOSS_NEGATIVE_FCF_EXTERNAL_DEPENDENCE" in out.mandatory_flags
     assert "OVERRIDE_1_LOSS_NEGATIVE_FCF_EXTERNAL_DEPENDENCE_CAPS_BAD_AVOID" in out.mandatory_overrides
-    assert out.category.score_10 < 4.0
+    # Override 1 caps the VERDICT label at Bad/Avoid, not the points.
+    assert out.verdict == "Weak / high financial risk"
+    # category points stay reproducible from the dimensions (HANDOFF_CONTRACT.md).
+    recomputed = Category(name="financial_analysis", max_points=15.0, dimensions=out.dimensions)
+    assert out.category.awarded_points == pytest.approx(recomputed.points(), abs=1e-6)
 
 
-def test_run_override_2_caps_score_below_8():
+def test_run_override_2_caps_verdict_not_points():
     out = fin.run(_minimal_nvda_like_packet(), overlay={"wacc": 5.0})  # absurdly high WACC
     assert "OVERRIDE_2_ROIC_BELOW_WACC" in out.mandatory_flags
-    assert out.category.score_10 < 8.0
+    # Override 2 caps the VERDICT label below Excellent, not the points.
+    assert out.verdict != "Excellent financial health"
+    recomputed = Category(name="financial_analysis", max_points=15.0, dimensions=out.dimensions)
+    assert out.category.awarded_points == pytest.approx(recomputed.points(), abs=1e-6)
+    assert out.category.score_10 == pytest.approx(recomputed.score10(), abs=1e-6)
 
 
 def _minimal_nvda_like_packet() -> Packet:
@@ -369,6 +403,64 @@ def test_run_nvda_fixture_category_math_reproduces_from_dimensions(nvda_packet):
     assert out.coverage == pytest.approx(recomputed.coverage(), abs=1e-6)
     # no override triggers on a profitable, well-capitalized NVDA with no wacc overlay
     assert out.mandatory_overrides == []
+
+
+def test_run_nvda_fixture_category_confidence_computed(nvda_packet):
+    """HANDOFF_CONTRACT.md rejects a packet whose category confidence is
+    absent -- so `category.confidence` must be a real number in [0, 100],
+    computed via `wbj.core.confidence.confidence()` (the Task 5 five-
+    component formula), not hardcoded `None`."""
+    out = fin.run(nvda_packet)
+    assert out.category.confidence is not None
+    assert 0.0 <= out.category.confidence <= 100.0
+
+
+def test_run_confidence_lower_when_fundamentals_stale(nvda_packet):
+    """The freshness component is derived from the packet's own
+    `quarterly_fundamentals` staleness flag, so a STALE packet yields a
+    strictly lower confidence than an otherwise-identical FRESH one."""
+    stale = nvda_packet.model_copy(update={"staleness": {**nvda_packet.staleness, "quarterly_fundamentals": "STALE"}})
+    fresh = nvda_packet.model_copy(update={"staleness": {**nvda_packet.staleness, "quarterly_fundamentals": "FRESH"}})
+    out_stale = fin.run(stale)
+    out_fresh = fin.run(fresh)
+    assert out_stale.category.confidence < out_fresh.category.confidence
+
+
+def test_run_category_reproduces_from_dimensions_even_with_override():
+    """HANDOFF_CONTRACT.md ("category points must reproduce from dimension
+    scores") has NO exception for overrides. An override caps the verdict
+    label, never the points -- so awarded_points must still equal
+    Category(dimensions).points() when an override fired."""
+    rows = [
+        _row(2025, revenue=900.0, net_income=-10.0, operating_cash_flow=-30.0, capex=-10.0, debt_repayment=50.0),
+        _row(2024, net_income=100.0, operating_cash_flow=150.0),
+    ]
+    out = fin.run(_minimal_packet(rows))
+    assert out.mandatory_overrides  # an override did fire
+    recomputed = Category(name="financial_analysis", max_points=15.0, dimensions=out.dimensions)
+    assert out.category.awarded_points == pytest.approx(recomputed.points(), abs=1e-6)
+    assert out.category.score_10 == pytest.approx(recomputed.score10(), abs=1e-6)
+
+
+def test_dim_returns_includes_dilution_metrics():
+    """SCORING.md names dilution (FIN-DX-032 SBC/rev, FIN-DX-033 diluted-
+    share CAGR) a primary input of the cash-conversion & capital-efficiency
+    dimension ("+ dilution")."""
+    assert "FIN-DX-032" in fin._DIMENSION_MEMBERS[fin.DIM_RETURNS]
+    assert "FIN-DX-033" in fin._DIMENSION_MEMBERS[fin.DIM_RETURNS]
+
+
+def test_run_dilution_metrics_feed_returns_dimension(nvda_packet):
+    """The dilution rows are scored (a band, not NOT_SCORABLE) and their
+    score participates in the returns dimension's weighted mean."""
+    out = fin.run(nvda_packet)
+    returns_dim = next(d for d in out.dimensions if d.name == fin.DIM_RETURNS)
+    # 6 core returns members + 2 dilution = 8 metric slots
+    assert len(returns_dim.metric_scores) == 8
+    dx032 = next(r for r in out.metrics if r.metric_id == "FIN-DX-032")
+    dx033 = next(r for r in out.metrics if r.metric_id == "FIN-DX-033")
+    assert dx032.score != "NOT_SCORABLE"
+    assert dx033.score != "NOT_SCORABLE"
 
 
 def test_run_nvda_fixture_serializes_to_json(nvda_packet):
