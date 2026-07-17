@@ -1,7 +1,14 @@
 # Quick FMP Scoring — Light up Market, Technical & Valuation in the quick scorecard
 
 **Date:** 2026-07-17
-**Status:** Approved (Phase 1 of a two-phase effort)
+**Status:** Implemented (Phase 1 of a two-phase effort) — 2026-07-17
+
+> Implementation note: live FMP `/stable/analyst-estimates` returns
+> `revenueAvg` / `numAnalystsRevenue` (not the legacy `estimatedRevenueAvg` /
+> `numberAnalystEstimatedRevenue` this spec's fixtures assumed). `quick.py`
+> reads both spellings (live first); the fixture was updated to the `/stable/`
+> shape. Verified end-to-end against live NVDA and AAPL — all six categories
+> light up (100/100 evidence points).
 
 ## Problem
 
