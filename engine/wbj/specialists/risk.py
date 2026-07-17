@@ -589,26 +589,10 @@ def profile_fit(position_size_pct: float | None) -> dict[str, Any]:
 
 
 # ============================================================================
-# Dimension cap helper -- same mechanism as business.py/market.py/technical.py
+# Scoring helper. (risk_analysis has no numeric dimension-level caps -- every
+# SCORING.md "Gate / cap" entry here is a confidence caveat or the label-only
+# <=4/15 Speculative override, not a point cap -- so no _apply_dimension_cap.)
 # ============================================================================
-
-
-def _apply_dimension_cap(metric_scores: list[tuple[float, Value]], *, cap: float) -> list[tuple[float, Value]]:
-    total = sum(w for w, _ in metric_scores)
-    valid = sum(w for w, v in metric_scores if v.is_valid)
-    if valid <= 0 or total <= 0:
-        return metric_scores
-    weighted_mean = sum(w * v.value for w, v in metric_scores if v.is_valid) / valid
-    if weighted_mean <= cap:
-        return metric_scores
-    factor = cap / weighted_mean
-    out: list[tuple[float, Value]] = []
-    for w, v in metric_scores:
-        if v.is_valid:
-            out.append((w, Value.of(v.value * factor, unit=v.unit, evidence_class=v.evidence_class, warnings=list(v.warnings))))
-        else:
-            out.append((w, v))
-    return out
 
 
 def _score_from_anchor(v: Value, anchors: list[tuple[float, float]]) -> float | None:
@@ -950,6 +934,15 @@ def run(packet: Packet, overlay: dict[str, Any] | None = None) -> RiskOutput:
     macro_series, company_series = overlay.get("macro_series"), overlay.get("company_series")
     v_cyc = macro_sensitivity_beta(company_series, macro_series) if macro_series and company_series else _null(NullState.MISSING, "ratio", "MACRO_SENSITIVITY_UNAVAILABLE")
     add("RSK-CYC-034", v_cyc, _score_from_anchor(v_cyc, [(2.0, 0), (1.0, 4), (0.5, 7), (0.0, 10)]) if v_cyc.is_valid else None)
+
+    # ---- RSK-THESIS-035: thesis-killer priority (judgment-only) ----
+    # Probability/Impact/Detectability/TimeUrgency are all explicit 0-1
+    # assumptions (FORMULAS.md: "Custom prioritization... no false
+    # precision"), so this metric is never scored mechanically -- it is a
+    # NOT_SCORABLE row paired with the thesis_killers JudgmentRequest below,
+    # the same judgment-only discipline as business.py's moat classification.
+    # Registered as a row so all 35 RSK formulas surface in out.metrics.
+    add("RSK-THESIS-035", _null(NullState.NOT_SCORABLE, "score", "THESIS_KILLER_PRIORITY_JUDGMENT_REQUIRED"), None)
 
     # ---- Thesis killers (judgment requests, per DECISION_RULES.md: always list >=3) ----
     thesis_killers_overlay = overlay.get("thesis_killers") or []

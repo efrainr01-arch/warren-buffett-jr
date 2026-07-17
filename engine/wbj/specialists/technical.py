@@ -394,13 +394,21 @@ def _confidence_for(v: Value) -> float:
 def _empty_output(packet: Packet, reason: str) -> TechnicalOutput:
     """`AGENT.md`'s boundary: "reject unadjusted histories" (TECH-T010) --
     an all-`NOT_SCORABLE`, zero-coverage `ERROR` envelope rather than a
-    crash or a silently-scored packet."""
+    crash or a silently-scored packet.
+
+    `awarded_points`/`score_10` are 0.0 by construction (empty dimensions),
+    but `confidence` is derived from the real five-component formula at
+    coverage 0 (not a hardcoded literal): confidence measures evidence
+    quality independent of the economic score, so an ERROR envelope still
+    reports the (low, non-zero) confidence the formula yields for a
+    zero-coverage packet from this data source."""
     dims = [Dimension(name=n, max_points=DIMENSION_MAX_POINTS[n], metric_scores=[]) for n in DIMENSION_NAMES]
+    n_sessions = len(packet.market_data.daily)
     return TechnicalOutput(
         agent_id=AGENT_ID, status="ERROR",
         security=SecurityRef(ticker=packet.security.ticker, exchange=packet.security.exchange, currency=packet.security.reporting_currency),
         knowledge_timestamp=packet.analysis.knowledge_timestamp,
-        category=CategoryStats(max_points=MAX_POINTS, awarded_points=0.0, score_10=0.0, confidence=0.0),
+        category=CategoryStats(max_points=MAX_POINTS, awarded_points=0.0, score_10=0.0, confidence=_category_confidence(0.0, n_sessions)),
         verdict=verdict(0.0), coverage=0.0, dimensions=dims, metrics=[],
         mandatory_flags=[reason], assumptions=[], judgment_requests=[],
         source_lineage=["packet.market_data.daily"], validation_tests=ValidationTestsSummary(passed=0, failed=1, warnings=0),
@@ -525,13 +533,23 @@ def run(packet: Packet, overlay: dict[str, Any] | None = None) -> TechnicalOutpu
     cmf_now = _last_valid(ind.cmf(df)) if volume_present else None
     obv_series = ind.obv(df) if volume_present else pd.Series(dtype=float)
     obv_slope = None
+    obv_score = None
     if volume_present and len(obv_series.dropna()) >= 20:
         tail = obv_series.dropna().tail(20).to_numpy(dtype=float)
         obv_slope, _ = np.polyfit(np.arange(len(tail), dtype=float), tail, 1)
+        # TECH-OBV-016: "use slope/divergence, not absolute level." The raw
+        # slope's magnitude is share-count and not comparable across
+        # tickers, so it is normalized by the 50-session median volume
+        # (net accumulation per session as a fraction of a typical day)
+        # before scoring -- a documented reading (FORMULAS.md gives no
+        # numeric OBV band). Positive = accumulation = constructive.
+        med_vol = float(df["volume"].tail(50).median()) if volume_present else 0.0
+        obv_norm = obv_slope / med_vol if med_vol else 0.0
+        obv_score = anchor_score(obv_norm, [(-0.5, 0), (0.0, 5), (0.3, 8), (0.6, 10)])
 
     add("TECH-VR-014", _ok(vr_now, unit="ratio") if vr_now is not None else _null(NullState.MISSING, "ratio", "VOLUME_UNAVAILABLE"), _score_from_anchor(_ok(vr_now, unit="ratio") if vr_now is not None else _null(NullState.MISSING, "ratio"), [(0.5, 2), (1.0, 5), (1.5, 8), (2.5, 10)]))
     add("TECH-UDV-015", _ok(udv_now, unit="ratio") if udv_now is not None else _null(NullState.MISSING, "ratio", "UDV_UNAVAILABLE"), _score_from_anchor(_ok(udv_now, unit="ratio") if udv_now is not None else _null(NullState.MISSING, "ratio"), [(0.5, 0), (0.8, 3), (1.2, 7), (2.0, 10)]))
-    add("TECH-OBV-016", _ok(float(obv_slope), unit="shares_per_session") if obv_slope is not None else _null(NullState.MISSING, "shares_per_session", "OBV_INSUFFICIENT_HISTORY"), None)
+    add("TECH-OBV-016", _ok(float(obv_slope), unit="shares_per_session") if obv_slope is not None else _null(NullState.MISSING, "shares_per_session", "OBV_INSUFFICIENT_HISTORY"), obv_score)
     add("TECH-CMF-017", _ok(cmf_now, unit="ratio") if cmf_now is not None else _null(NullState.MISSING, "ratio", "CMF_UNAVAILABLE"), _score_from_anchor(_ok(cmf_now, unit="ratio") if cmf_now is not None else _null(NullState.MISSING, "ratio"), [(-0.20, 0), (-0.10, 2), (0.0, 5), (0.10, 8), (0.20, 10)]))
 
     # ---- TECH-VOL-018 / TECH-VCP-019 / TECH-TIGHT-038: volatility ----
@@ -629,24 +647,23 @@ def run(packet: Packet, overlay: dict[str, Any] | None = None) -> TechnicalOutpu
         rs_scores.append((1 / 3, Value.of(s, unit="score") if s is not None else Value.null(NullState.NOT_SCORABLE, unit="score")))
     rs_dim = Dimension(name=DIM_RS, max_points=DIMENSION_MAX_POINTS[DIM_RS], metric_scores=rs_scores)
 
-    # ---- DIM_VOLUME (3 pts): capped at 5 when volume missing ----
-    # "Missing volume" is a hard *cap*, not a coverage gate (SCORING.md:
-    # "Score capped 5 when volume is missing/unadjusted") -- with volume
-    # absent, VR/UDV/CMF are all individually NOT_SCORABLE, which would
-    # otherwise drop the dimension's valid weight to 0% and make it
-    # entirely unscorable (Dimension.score10_value's own <70%-usable
-    # NOT_SCORABLE gate) rather than merely capped. A single synthetic
-    # neutral placeholder score (5.0, the cap itself) keeps the dimension
-    # scorable at exactly its capped ceiling, consistent with every other
-    # dimension-level cap in this codebase being a point cap, not a
-    # coverage cliff.
-    if volume_present:
-        vol_scores: list[tuple[float, Value]] = []
-        for mid in ("TECH-VR-014", "TECH-UDV-015", "TECH-CMF-017"):
-            s = by_id[mid].score10
-            vol_scores.append((1 / 3, Value.of(s, unit="score") if s is not None else Value.null(NullState.NOT_SCORABLE, unit="score")))
-    else:
-        vol_scores = [(1.0, Value.of(5.0, unit="score", warnings=["VOLUME_UNAVAILABLE_CAPPED_AT_5"]))]
+    # ---- DIM_VOLUME (3 pts): VR/UDV/OBV/CMF (SCORING.md TECH-VR-014..017) ----
+    # SCORING.md's gate ("Score capped 5 when volume is missing/unadjusted")
+    # is a *cap on a real score*, never a licence to fabricate one: when
+    # volume is entirely absent every member here is NOT_SCORABLE, so the
+    # dimension is honestly NOT_SCORABLE (contributes 0 coverage, 0 points)
+    # rather than being handed a synthetic mid score -- "missing evidence is
+    # never neutral" (SCORING.md). `_apply_dimension_cap(..., cap=5.0)` only
+    # bites when a genuine volume score above 5 exists to scale down (an
+    # unadjusted-but-present series); with fully missing volume it is a
+    # no-op (nothing valid), and the VOLUME_UNAVAILABLE_DEMAND_CAPPED flag
+    # below records the gap.
+    vol_scores: list[tuple[float, Value]] = []
+    for mid in ("TECH-VR-014", "TECH-UDV-015", "TECH-OBV-016", "TECH-CMF-017"):
+        s = by_id[mid].score10
+        vol_scores.append((0.25, Value.of(s, unit="score") if s is not None else Value.null(NullState.NOT_SCORABLE, unit="score")))
+    if not volume_present:
+        vol_scores = _apply_dimension_cap(vol_scores, cap=5.0)
     demand_dim = Dimension(name=DIM_VOLUME, max_points=DIMENSION_MAX_POINTS[DIM_VOLUME], metric_scores=vol_scores)
 
     # ---- DIM_EARNINGS_GAP (3 pts) ----
@@ -657,11 +674,13 @@ def run(packet: Packet, overlay: dict[str, Any] | None = None) -> TechnicalOutpu
     ]
     gap_dim = Dimension(name=DIM_EARNINGS_GAP, max_points=DIMENSION_MAX_POINTS[DIM_EARNINGS_GAP], metric_scores=gap_scores)
 
-    # ---- DIM_BREAKOUT_BASE (3 pts) ----
+    # ---- DIM_BREAKOUT_BASE (3 pts): VCP/LSTR/BCONF/BASE + TIGHT-038 ----
+    # SCORING.md lists TECH-TIGHT-038 (tight-close ratio) as a primary input
+    # of breakout & base quality alongside VCP-019/PIV-022..033/BASE-037.
     breakout_scores: list[tuple[float, Value]] = []
-    for mid in ("TECH-VCP-019", "TECH-LSTR-028", "TECH-BCONF-031", "TECH-BASE-037"):
+    for mid in ("TECH-VCP-019", "TECH-LSTR-028", "TECH-BCONF-031", "TECH-BASE-037", "TECH-TIGHT-038"):
         s = by_id[mid].score10
-        breakout_scores.append((0.25, Value.of(s, unit="score") if s is not None else Value.null(NullState.NOT_SCORABLE, unit="score")))
+        breakout_scores.append((0.2, Value.of(s, unit="score") if s is not None else Value.null(NullState.NOT_SCORABLE, unit="score")))
     breakout_dim = Dimension(name=DIM_BREAKOUT_BASE, max_points=DIMENSION_MAX_POINTS[DIM_BREAKOUT_BASE], metric_scores=breakout_scores)
 
     # ---- DIM_SECTOR_BREADTH_VOL (3 pts) ----

@@ -15,13 +15,23 @@ Sources of truth (`Cerebro/06_valuation_analysis/`):
 Every DCF/WACC/reverse-DCF/scenario/Monte-Carlo/ensemble formula is a
 direct call into `wbj.engines.valuation_engine` (Task 13) --
 `nopat`/`invested_capital`/`roic`/`fundamental_growth`,
-`cost_of_equity`/`synthetic_kd`/`wacc`, `dcf_value`/`equity_bridge`/
-`per_share`, `economic_profit_value`/`reconciles`, `justified_pe`/
-`justified_ev_sales`/`hist_zscore`, `reverse_dcf`, `scenarios`,
-`monte_carlo`, `ensemble`, `margin_of_safety`. This module's own code is
-the *orchestration* layer: deriving each engine call's inputs from
-`Packet` (+ `overlay`), assembling the five weighted dimensions, and
-shaping `OUTPUT_SCHEMA.md`'s extension fields -- not new valuation math.
+`cost_of_equity`/`synthetic_kd`/`wacc`, `equity_bridge`/`per_share`,
+`economic_profit_value`/`reconciles`, `justified_pe`/`justified_ev_sales`/
+`hist_zscore`, `reverse_dcf`, `scenarios`, `monte_carlo`, `ensemble`,
+`margin_of_safety`. This module's own code is the *orchestration* layer:
+deriving each engine call's inputs from `Packet` (+ `overlay`), assembling
+the five weighted dimensions, and shaping `OUTPUT_SCHEMA.md`'s extension
+fields -- not new valuation math.
+
+The FCFF DCF itself is run through the engine's `scenarios` (whose
+per-branch `_constant_growth_value` is the engine's own constant-growth
+FCFF DCF) and `monte_carlo`, not the engine's list-based `dcf_value`
+helper -- `dcf_value` takes an already-built explicit FCFF path, whereas
+this module forecasts the path from a growth/margin/ROIC driver set, which
+is exactly what `scenarios`/`monte_carlo`/`reverse_dcf` are built to
+consume. `model_cross_checks.dispersion` (and its reliability-weighted
+value) comes from the engine's `ensemble` (VAL-ENSEMBLE-044), not an
+unweighted stdlib stdev.
 
 ## Model-selection matrix (brief's simplification of DECISION_RULES.md)
 
@@ -298,12 +308,17 @@ def _fact(packet: Packet, key: str) -> float | None:
 
 
 def _unsupported_adapter_output(packet: Packet) -> ValuationOutput:
+    # awarded_points/score_10 are 0.0 by construction (empty dimensions),
+    # but confidence is derived from the real five-component formula at
+    # coverage 0 -- for an unsupported adapter that yields a low value (the
+    # model_fit component drops to 40 for a non-default adapter), which is
+    # the honest signal, not a hardcoded 0.0 literal.
     dims = [Dimension(name=n, max_points=DIMENSION_MAX_POINTS[n], metric_scores=[]) for n in DIMENSION_NAMES]
     return ValuationOutput(
         agent_id=AGENT_ID, status="ERROR",
         security=SecurityRef(ticker=packet.security.ticker, exchange=packet.security.exchange, currency=packet.security.reporting_currency),
         knowledge_timestamp=packet.analysis.knowledge_timestamp,
-        category=CategoryStats(max_points=MAX_POINTS, awarded_points=0.0, score_10=0.0, confidence=0.0),
+        category=CategoryStats(max_points=MAX_POINTS, awarded_points=0.0, score_10=0.0, confidence=_category_confidence(0.0, packet)),
         verdict=verdict(0.0), coverage=0.0, dimensions=dims, metrics=[],
         mandatory_flags=["ADAPTER_UNSUPPORTED"],
         assumptions=[
@@ -534,8 +549,26 @@ def run(packet: Packet, overlay: dict[str, Any] | None = None) -> ValuationOutpu
     relative_value = None
     if peer_multiples and len(peer_multiples) >= MIN_PEERS and revenue0:
         relative_value = float(np.median(peer_multiples)) * revenue0 / diluted_shares if diluted_shares else None
-    dispersion_inputs = [v for v in (fcff_per_share, econ_profit_per_share, relative_value) if v is not None]
-    dispersion = float(np.std(dispersion_inputs)) if len(dispersion_inputs) > 1 else None
+    # ---- Reliability-weighted ensemble (VAL-ENSEMBLE-044) -> dispersion + value ----
+    # Reuse the engine's `ensemble` rather than an unweighted stdlib stdev:
+    # weights reflect model reliability (FCFF DCF is the primary model;
+    # economic profit a high-reliability cross-check that should reconcile;
+    # the peer-relative read is weaker). `ensemble` excludes null-valued
+    # models and returns both the reliability-weighted value and the
+    # dispersion across the included values.
+    ensemble_models: list[EnsembleModelInput] = []
+    if fcff_per_share is not None:
+        ensemble_models.append(EnsembleModelInput(label="FCFF_DCF", value=_ok(fcff_per_share, "usd_per_share"), weight=1.0))
+    if econ_profit_per_share is not None:
+        ensemble_models.append(EnsembleModelInput(label="ECONOMIC_PROFIT", value=_ok(econ_profit_per_share, "usd_per_share"), weight=0.8))
+    if relative_value is not None:
+        ensemble_models.append(EnsembleModelInput(label="RELATIVE", value=_ok(relative_value, "usd_per_share"), weight=0.5))
+    ensemble_result = ve.ensemble(ensemble_models) if ensemble_models else None
+    dispersion = (
+        ensemble_result.dispersion.value
+        if ensemble_result is not None and ensemble_result.dispersion.is_valid
+        else None
+    )
 
     # ---- Fair-value distribution via Monte Carlo (VAL-MC-037) ----
     fv_dist = FairValueDistribution()

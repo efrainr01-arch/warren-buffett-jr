@@ -156,6 +156,49 @@ def test_VAL_T010_bank_selected_adapter_unsupported():
     assert "FCFF_DCF" in out.model_selection.rejected
 
 
+def test_dispersion_comes_from_ensemble_not_raw_stdev():
+    """model_cross_checks.dispersion must come from
+    valuation_engine.ensemble() (VAL-ENSEMBLE-044, reliability-weighted),
+    reproducing its `.dispersion` exactly for the same model inputs -- not
+    an ad-hoc unweighted np.std."""
+    from wbj.core.nullstates import EvidenceClass, Value
+
+    rows = [_row(2025), _row(2024)]
+    packet = _minimal_packet(rows)
+    out = val.run(packet)
+    fcff = out.model_cross_checks.fcff
+    ep = out.model_cross_checks.economic_profit
+    rel = out.model_cross_checks.relative
+    models = []
+    if fcff is not None:
+        models.append(val.EnsembleModelInput(label="FCFF_DCF", value=Value.of(fcff, unit="usd_per_share", evidence_class=EvidenceClass.C), weight=1.0))
+    if ep is not None:
+        models.append(val.EnsembleModelInput(label="ECONOMIC_PROFIT", value=Value.of(ep, unit="usd_per_share", evidence_class=EvidenceClass.C), weight=0.8))
+    if rel is not None:
+        models.append(val.EnsembleModelInput(label="RELATIVE", value=Value.of(rel, unit="usd_per_share", evidence_class=EvidenceClass.C), weight=0.5))
+    if len(models) > 1:
+        expected = ve.ensemble(models)
+        assert out.model_cross_checks.dispersion == pytest.approx(expected.dispersion.value)
+    else:
+        # too few models to form an ensemble -> dispersion is None, not a raw stdev
+        assert out.model_cross_checks.dispersion is None
+
+
+def test_unsupported_adapter_confidence_derived_from_formula():
+    """The ADAPTER_UNSUPPORTED ERROR envelope derives confidence from the
+    real five-component formula at coverage 0 (model_fit drops to 40 for a
+    non-default adapter), not a hardcoded 0.0 -- awarded_points/score_10
+    stay 0.0 by construction."""
+    rows = [_row(2025), _row(2024)]
+    packet = _minimal_packet(rows, industry_adapter="reit_adapter")
+    out = val.run(packet)
+    assert out.category.awarded_points == 0.0
+    assert out.category.score_10 == 0.0
+    expected = val._category_confidence(0.0, packet)
+    assert out.category.confidence == pytest.approx(expected)
+    assert out.category.confidence > 0.0
+
+
 # ============================================================================
 # ADAPTER_UNSUPPORTED gate
 # ============================================================================

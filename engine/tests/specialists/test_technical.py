@@ -184,14 +184,57 @@ def test_TECH_T011_pivot_delayed_by_k_sessions():
     assert all(p.index <= n - 1 - 3 for p in pivots)
 
 
-def test_TECH_T012_missing_volume_caps_demand_and_blocks_breakout(nvda_packet):
-    """Volume missing -> Volume dimension capped; breakout cannot confirm."""
+def test_TECH_T012_missing_volume_marks_demand_not_scorable_no_fabrication(nvda_packet):
+    """Volume missing -> Volume dimension honestly NOT_SCORABLE (no
+    fabricated evidence), breakout cannot confirm, flag raised. "Missing
+    evidence is never neutral" (SCORING.md) -- with every volume member
+    NOT_SCORABLE the dimension carries zero valid weight rather than a
+    synthetic mid score, so it contributes 0 coverage and 0 points."""
     closes = _uptrend_closes(220)
     packet = _packet(closes, volumes=[0.0] * 220)
     out = tech.run(packet)
     demand_dim = next(d for d in out.dimensions if d.name == tech.DIM_VOLUME)
-    assert demand_dim.score10() <= 5.0 + 1e-9
+    assert demand_dim.valid_weight() == 0.0            # no fabricated score
+    assert demand_dim.score10_value().is_null           # honestly unscorable
     assert "VOLUME_UNAVAILABLE_DEMAND_CAPPED" in out.mandatory_flags
+    # category still reproduces from dimensions (a NOT_SCORABLE dim -> 0 pts)
+    recomputed = Category(name=tech.AGENT_ID, max_points=tech.MAX_POINTS, dimensions=out.dimensions)
+    assert out.category.awarded_points == pytest.approx(recomputed.points(), abs=1e-6)
+
+
+def test_run_obv_is_a_scored_volume_dimension_member():
+    """SCORING.md lists TECH-OBV-016 as a primary input of the volume
+    dimension (TECH-VR-014..017); it must be scored and participate in the
+    dimension's weighted mean, not reported context-only."""
+    packet = _packet(_uptrend_closes(260))
+    out = tech.run(packet)
+    obv_row = next(r for r in out.metrics if r.metric_id == "TECH-OBV-016")
+    assert obv_row.score != "NOT_SCORABLE"
+    demand_dim = next(d for d in out.dimensions if d.name == tech.DIM_VOLUME)
+    assert len(demand_dim.metric_scores) == 4  # VR, UDV, OBV, CMF
+
+
+def test_run_tight_close_is_a_scored_breakout_dimension_member():
+    """SCORING.md lists TECH-TIGHT-038 as a primary input of breakout &
+    base quality; it must participate in that dimension's weighted mean."""
+    packet = _packet(_uptrend_closes(260))
+    out = tech.run(packet)
+    breakout_dim = next(d for d in out.dimensions if d.name == tech.DIM_BREAKOUT_BASE)
+    assert len(breakout_dim.metric_scores) == 5  # VCP, LSTR, BCONF, BASE, TIGHT
+
+
+def test_empty_output_confidence_derived_from_formula_not_hardcoded():
+    """The unadjusted-rejection ERROR envelope derives confidence from the
+    real five-component formula at coverage 0, not a hardcoded 0.0
+    literal (awarded_points/score_10 stay 0.0 by construction)."""
+    packet = _packet(_uptrend_closes(30), adjusted=False)
+    out = tech.run(packet)
+    assert out.status == "ERROR"
+    assert out.category.awarded_points == 0.0
+    assert out.category.score_10 == 0.0
+    expected = tech._category_confidence(0.0, len(packet.market_data.daily))
+    assert out.category.confidence == pytest.approx(expected)
+    assert out.category.confidence > 0.0  # formula yields a real, low value
 
 
 # ============================================================================

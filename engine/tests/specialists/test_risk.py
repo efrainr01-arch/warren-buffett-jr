@@ -293,14 +293,23 @@ def test_profile_fit_within_cap():
 # ============================================================================
 
 
-def test_apply_dimension_cap_scales_to_hit_cap_exactly():
-    from wbj.core.nullstates import Value
+def test_risk_has_no_apply_dimension_cap_helper():
+    """risk_analysis has no numeric dimension-level caps (every SCORING.md
+    'Gate / cap' entry here is a confidence caveat or the label-only
+    <=4/15 Speculative override), so the shared _apply_dimension_cap is not
+    imported into this module -- it was dead code and is removed."""
+    assert not hasattr(risk, "_apply_dimension_cap")
 
-    scores = [(0.5, Value.of(10.0, unit="score")), (0.5, Value.of(8.0, unit="score"))]
-    capped = risk._apply_dimension_cap(scores, cap=6.0)
-    weighted = sum(w * v.value for w, v in capped if v.is_valid)
-    total_w = sum(w for w, v in capped if v.is_valid)
-    assert weighted / total_w == pytest.approx(6.0)
+
+def test_run_thesis_killer_priority_row_present_all_35_formulas(nvda_packet):
+    """RSK-THESIS-035 (thesis_killer_priority) must surface in out.metrics
+    (judgment-only, NOT_SCORABLE) so all 35 RSK formulas are accounted
+    for -- previously only 34 rows appeared."""
+    out = risk.run(nvda_packet)
+    ids = {r.metric_id for r in out.metrics}
+    assert "RSK-THESIS-035" in ids
+    row = next(r for r in out.metrics if r.metric_id == "RSK-THESIS-035")
+    assert row.score == "NOT_SCORABLE"
 
 
 def test_run_solvency_warning_via_overlay_interest_expense():

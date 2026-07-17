@@ -304,6 +304,19 @@ def test_durability_capped_at_6_with_concentration_red_flag():
     assert durability_dim.score10() <= 6.0 + 1e-9
 
 
+def test_wide_moat_gate_margin_condition_uses_5pp_not_3pp():
+    """DECISION_RULES.md wide-moat gate condition 2 says the 5y operating-
+    margin range must be 'no more than 5 percentage points' (<=0.05) -- a
+    company with a 4pp range must PASS condition 2 (it fails the stricter
+    <=0.03 BUS-RANGE-010 'positive moat signal', which is a different
+    threshold for a different purpose)."""
+    assert bus.wide_moat_margin_range_ok(0.04) is True   # 4pp passes the gate
+    assert bus.wide_moat_margin_range_ok(0.05) is True    # exactly 5pp is "no more than 5"
+    assert bus.wide_moat_margin_range_ok(0.0501) is False  # above 5pp fails
+    # ...while BUS-RANGE-010's own 'positive moat signal' stays at <=0.03:
+    assert bus.margin_range_is_stable(0.04) is False
+
+
 def test_dilution_red_flag_when_diluted_cagr_above_5pct():
     rows = [
         _row(2025, diluted_shares=130.0),

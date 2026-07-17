@@ -119,6 +119,7 @@ __all__ = [
     "is_concentration_red_flag",
     "is_dilution_red_flag",
     "margin_range_is_stable",
+    "wide_moat_margin_range_ok",
     # formula functions
     "segment_revenue_share",
     "recurring_revenue_pct",
@@ -298,8 +299,21 @@ def margin_range(margins: Sequence[float]) -> Value:
 
 def margin_range_is_stable(range_pct: float) -> bool:
     """FORMULAS.md, verbatim: "A range <=3 percentage points is a positive
-    moat signal"."""
+    moat signal" (BUS-RANGE-010). Distinct from the wide-moat *gate*'s own,
+    looser 5pp threshold -- see `wide_moat_margin_range_ok`."""
     return range_pct <= 0.03
+
+
+def wide_moat_margin_range_ok(range_pct: float) -> bool:
+    """DECISION_RULES.md wide-moat gate condition 2, verbatim: the five-year
+    operating-margin range is "no more than 5 percentage points" (<=0.05).
+
+    This is deliberately looser than `margin_range_is_stable`'s <=0.03
+    BUS-RANGE-010 "positive moat signal": the two thresholds serve different
+    purposes and a 3-5pp company legitimately clears the gate while not
+    earning the stronger BUS-RANGE-010 moat signal. Confusing the two
+    wrongly fails such a company's wide-moat gate."""
+    return range_pct <= 0.05
 
 
 # ============================================================================
@@ -1130,7 +1144,7 @@ def run(packet: Packet, overlay: dict[str, Any] | None = None) -> BusinessOutput
     moat_gate_mechanical = (
         positive_spread
         and (persistence_frac is not None and persistence_frac >= 0.8)
-        and ctx.get("margin_range") is not None and margin_range_is_stable(ctx["margin_range"])
+        and ctx.get("margin_range") is not None and wide_moat_margin_range_ok(ctx["margin_range"])
         and not concentration_flag
     )
     excellent_gate_passes = (
