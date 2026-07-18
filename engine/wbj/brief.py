@@ -160,6 +160,7 @@ def _probability(packet: dict, targets: dict) -> dict:
 
     return {
         "status": "ok",
+        "price": s0,
         "volatility": round(sigma, 4),
         "horizon": targets.get("horizon", "12 meses"),
         "assumptions": (
@@ -242,6 +243,30 @@ def _insider_highlights(trades: list[dict] | None,
     return out[:6]
 
 
+def _insiders_flow(trades: list[dict] | None) -> dict:
+    """Net open-market insider flow across the feed: total purchase vs sale
+    dollars (`shares * price`). Gifts/awards (price 0) contribute nothing.
+    Feeds the buy-vs-sell bar; a coarser, fuller-picture lens than the >$1M
+    highlights."""
+    buy = sell = 0.0
+    buy_n = sell_n = 0
+    for t in (trades or []):
+        value = (t.get("securitiesTransacted") or 0) * (t.get("price") or 0)
+        if value <= 0:
+            continue
+        ttype = (t.get("transactionType") or "").upper()
+        if ttype.startswith("P"):
+            buy += value
+            buy_n += 1
+        elif ttype.startswith("S"):
+            sell += value
+            sell_n += 1
+    return {
+        "buy_usd": round(buy, 2), "sell_usd": round(sell, 2),
+        "net_usd": round(buy - sell, 2), "buy_count": buy_n, "sell_count": sell_n,
+    }
+
+
 def _risks(packet: dict, scorecard: dict) -> list[str]:
     a = packet["annual"]
     rev, ni = a["revenue"], a["net_income"]
@@ -299,6 +324,7 @@ def company_brief(packet: dict, scorecard: dict, targets: dict) -> dict:
             "levels": _levels(targets),
             "catalysts": _catalysts(md.get("earnings"), as_of),
             "insiders": _insider_highlights(md.get("insiders")),
+            "insiders_flow": _insiders_flow(md.get("insiders")),
             "risks": _risks(packet, scorecard),
         },
     }

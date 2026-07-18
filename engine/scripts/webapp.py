@@ -192,6 +192,24 @@ PAGE = """<!doctype html>
   .ins-buy { color:var(--green); font-weight:800; } .ins-sell { color:var(--red); font-weight:800; }
   .risk li::before { content:"⚠ "; color:var(--orange); }
   .brief-note { font-size:12px; color:var(--muted); margin-top:6px; }
+  .bh.sm { font-size:12px; margin-bottom:8px; }
+  .info { cursor:help; color:var(--muted); font-weight:700; margin-left:4px; }
+  /* health strip */
+  .hstrip { display:flex; flex-wrap:wrap; gap:8px 16px; margin:12px 0 4px; }
+  .hdot { display:flex; align-items:center; gap:8px; cursor:help; }
+  .hdot .dot { width:14px; height:14px; border-radius:50%; flex:0 0 auto; }
+  .hdot .hl { font-size:14px; font-weight:600; }
+  /* bell curve */
+  svg.bell { display:block; margin:6px 0 2px; overflow:visible; }
+  /* catalyst */
+  .cat-big { font-size:26px; font-weight:800; letter-spacing:-.02em; margin:2px 0; }
+  /* insider net bar */
+  .netbar { display:flex; height:24px; border-radius:8px; overflow:hidden;
+    border:1px solid var(--grid); margin:4px 0 8px; }
+  .netbar i { display:block; } .netbar .buy { background:var(--green); } .netbar .sell { background:var(--red); }
+  .netlegend { display:flex; justify-content:space-between; font-size:13px; font-weight:700; }
+  .okflag { color:var(--green); font-weight:700; font-size:14px; margin-top:6px;
+    background:var(--green-bg); padding:8px 12px; border-radius:10px; display:inline-block; }
   .c-chart h2 { color:#fff; } .c-chart .sub { color:#8b929c; }
   .chart-head { display:flex; align-items:baseline; gap:14px; flex-wrap:wrap; margin:8px 0 4px; }
   .chart-head .px { font-size:34px; font-weight:800; letter-spacing:-.02em; }
@@ -528,90 +546,153 @@ function money(x, dec) {
   return '$' + Number(x).toLocaleString('en-US', {minimumFractionDigits: dec || 0, maximumFractionDigits: dec || 0});
 }
 
+const fmtUSD = x => {
+  const a = Math.abs(x);
+  if (a >= 1e9) return '$' + (x / 1e9).toFixed(1) + 'B';
+  if (a >= 1e6) return '$' + (x / 1e6).toFixed(1) + 'M';
+  if (a >= 1e3) return '$' + (x / 1e3).toFixed(0) + 'K';
+  return '$' + x.toFixed(0);
+};
+const scoreColor = s => s == null ? 'var(--muted)' :
+  s >= 6.5 ? 'var(--green)' : s >= 3.5 ? 'var(--orange)' : 'var(--red)';
+const shortLabel = l => l.replace(' (quick)', '');
+
+// Lognormal "bell" of where the price could land in 12 months (dashed = it's
+// a projection, not observed history — Cerebro rule 3). Neutral single-hue
+// fill; today + each target as labelled status-colored ticks.
+function bellSvg(price, sigma, targets) {
+  const W = 620, H = 200, PADX = 16, PADT = 22, PADB = 50, N = 140;
+  const lo = price * Math.exp(-3 * sigma), hi = price * Math.exp(3 * sigma);
+  const X = x => PADX + (Math.log(x / lo) / Math.log(hi / lo)) * (W - 2 * PADX);
+  const clamp = x => Math.max(lo, Math.min(hi, x));
+  let ymax = 0; const pts = [];
+  for (let i = 0; i <= N; i++) {
+    const x = lo * Math.pow(hi / lo, i / N);
+    const z = Math.log(x / price) / sigma;
+    const dens = Math.exp(-z * z / 2) / x;
+    pts.push([x, dens]); if (dens > ymax) ymax = dens;
+  }
+  const Y = dRatio => PADT + (1 - dRatio) * (H - PADT - PADB);
+  const line = pts.map((p, i) => `${i ? 'L' : 'M'}${X(p[0]).toFixed(1)},${Y(p[1] / ymax).toFixed(1)}`).join(' ');
+  const area = `M${X(lo).toFixed(1)},${H - PADB} ` +
+    pts.map(p => `L${X(p[0]).toFixed(1)},${Y(p[1] / ymax).toFixed(1)}`).join(' ') +
+    ` L${X(hi).toFixed(1)},${H - PADB} Z`;
+
+  // "Hoy" label above the chart; target labels below, de-cluttered into
+  // stacked rows so near-equal targets never overlap (Cerebro rule: look at it).
+  const col = {bull: 'var(--green)', base: 'var(--blue)', bear: 'var(--red)'};
+  const by = {}; targets.forEach(t => by[t.key] = t);
+  const vlines = ['bear', 'base', 'bull'].filter(k => by[k]).map(k => {
+    const px = X(clamp(by[k].target));
+    return `<line x1="${px}" y1="${PADT}" x2="${px}" y2="${H - PADB}" stroke="${col[k]}"
+      stroke-width="1.5" stroke-dasharray="3 3" />`;
+  }).join('');
+  const bottom = ['bear', 'base', 'bull'].filter(k => by[k])
+    .map(k => ({x: X(clamp(by[k].target)), color: col[k],
+                text: `${by[k].label} ${(by[k].prob_reach * 100).toFixed(0)}%`}))
+    .sort((a, b) => a.x - b.x);
+  const rowLastX = [];
+  bottom.forEach(it => {
+    let r = 0;
+    while (r < rowLastX.length && it.x - rowLastX[r] < 60) r++;
+    it.row = r; rowLastX[r] = it.x;
+  });
+  const bottomLabels = bottom.map(it =>
+    `<text x="${it.x.toFixed(1)}" y="${(H - PADB + 16 + it.row * 15).toFixed(1)}"
+      text-anchor="middle" font-size="12" font-weight="800" fill="${it.color}">${it.text}</text>`).join('');
+  const hx = X(clamp(price));
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet" class="bell">
+    <path d="${area}" fill="var(--purple-bg)" />
+    <path d="${line}" fill="none" stroke="var(--purple)" stroke-width="2.5" stroke-dasharray="6 4" />
+    <line x1="${hx}" y1="${PADT - 8}" x2="${hx}" y2="${H - PADB}" stroke="var(--ink)" stroke-width="2.5" />
+    <text x="${hx.toFixed(1)}" y="${PADT - 11}" text-anchor="middle" font-size="12"
+      font-weight="800" fill="var(--ink)">Hoy ${fmtUSD(price)}</text>
+    ${vlines}${bottomLabels}
+  </svg>`;
+}
+
 function briefHtml(d) {
   const b = d.brief;
   if (!b) return '';
   const it = b.interpretation, pr = b.probability, w = b.watch;
 
-  // 1) Qué significa el score
+  // 1) Veredicto + tira de salud (color por categoría; /10 en hover)
   const cls = it.classification || 'neutral';
   const revisit = it.revisit ? `<div class="revisit">↻ ${it.revisit}</div>` : '';
-  const cats = (it.categories || []).map(c => {
-    const ns = c.score10 == null;
-    const val = ns ? 'N/S' : `${c.score10}/10 · ${c.meaning}`;
-    return `<div class="cat-row"><span class="mn ${ns ? 'ns' : ''}">${c.label}</span><span>${val}</span></div>`;
+  const dots = (it.categories || []).map(c => {
+    const tip = c.score10 == null ? `${shortLabel(c.label)}: sin datos` :
+      `${shortLabel(c.label)}: ${c.score10}/10 · ${c.meaning}`;
+    return `<div class="hdot" title="${tip}">
+      <span class="dot" style="background:${scoreColor(c.score10)}"></span>
+      <span class="hl">${shortLabel(c.label)}</span></div>`;
   }).join('');
   const interpCol = `<div class="brief-col">
-    <div class="bh">Qué significa el puntaje</div>
+    <div class="bh">El veredicto</div>
     <span class="classpill ${cls}">${(cls || 'sin dato').toUpperCase()}</span>
-    <div class="revisit">${it.classification_label}</div>${revisit}${cats}</div>`;
+    <div class="revisit">${it.classification_label}</div>${revisit}
+    <div class="hstrip">${dots}</div>
+    <div class="brief-note">Pasa el mouse por cada punto para ver su nota.</div></div>`;
 
-  // 2) Probabilidad hacia el precio
+  // 2) Probabilidad → campana
   let probCol;
   if (pr.status === 'ok') {
-    const by = {}; pr.targets.forEach(t => by[t.key] = t);
-    const order = ['bull', 'base', 'bear'];
-    const col = {bull: 'var(--green)', base: 'var(--blue)', bear: 'var(--red)'};
-    // partition bar: below-bear / bear-base / base-bull / above-bull
-    const pb = by.bear.prob_reach, pm = by.base.prob_reach, pu = by.bull.prob_reach;
-    const seg = [
-      [(1 - pb) * 100, '#c9ced8', 'por debajo de Bear'],
-      [(pb - pm) * 100, 'var(--red)', 'Bear→Medio'],
-      [(pm - pu) * 100, 'var(--blue)', 'Medio→Bull'],
-      [pu * 100, 'var(--green)', 'por encima de Bull'],
-    ].map(s => `<i style="width:${Math.max(0, s[0]).toFixed(1)}%;background:${s[1]}" title="${s[2]}: ${s[0].toFixed(0)}%"></i>`).join('');
-    const rows = order.map(k => {
-      const t = by[k];
-      return `<div class="prow"><span class="tag ${k}">${t.label}</span>
-        <span class="pt">llegar a ${money(t.target, 0)}</span>
-        <span class="pv">${(t.prob_reach * 100).toFixed(0)}%</span></div>`;
-    }).join('');
     probCol = `<div class="brief-col">
-      <div class="bh">Probabilidad hacia el precio (12 meses)</div>
-      <div class="probbar">${seg}</div>
-      <div class="modal">Resultado más probable: <b>${pr.modal_zone}</b> (${(pr.modal_prob * 100).toFixed(0)}%)</div>
-      ${rows}
-      <div class="brief-note">${pr.assumptions}</div></div>`;
+      <div class="bh">Dónde podría estar el precio en 12 meses
+        <span class="info" title="${pr.assumptions}">ⓘ</span></div>
+      <div class="modal">Lo más probable: <b>${pr.modal_zone}</b> (${(pr.modal_prob * 100).toFixed(0)}%)</div>
+      ${bellSvg(pr.price, pr.volatility, pr.targets)}
+      <div class="brief-note">Curva punteada = estimación a futuro, no historia. Área = qué tan probable es cada precio.</div></div>`;
   } else {
-    probCol = `<div class="brief-col"><div class="bh">Probabilidad hacia el precio</div>
+    probCol = `<div class="brief-col"><div class="bh">Dónde podría estar el precio</div>
       <p style="color:var(--ink2);font-size:14px">No calculable: ${pr.reason}.</p></div>`;
   }
 
   // 3) Puntos clave a vigilar
   const lv = w.levels;
   const levelsBlock = lv.status === 'ok' ? `<div class="levels">
-      <div class="lvl entrada"><div class="k">Entrada aprox.</div><div class="v">${money(lv.entrada, 2)}</div></div>
-      <div class="lvl inval"><div class="k">Invalidación</div><div class="v">${lv.invalidacion != null ? money(lv.invalidacion, 2) : '—'}</div></div>
-      <div class="lvl salida"><div class="k">Salida (Medio)</div><div class="v">${lv.salida_base != null ? money(lv.salida_base, 2) : '—'}</div></div>
-    </div><div class="brief-note">${lv.nota}</div>` :
-    `<p style="color:var(--ink2);font-size:14px">Niveles no disponibles: ${lv.reason}.</p>`;
+      <div class="lvl entrada"><div class="k">Entrada</div><div class="v">${money(lv.entrada, 0)}</div></div>
+      <div class="lvl inval"><div class="k">Se rompe</div><div class="v">${lv.invalidacion != null ? money(lv.invalidacion, 0) : '—'}</div></div>
+      <div class="lvl salida"><div class="k">Objetivo</div><div class="v">${lv.salida_base != null ? money(lv.salida_base, 0) : '—'}</div></div>
+    </div><div class="brief-note">Referencia (research), no una orden.</div>` :
+    `<p style="color:var(--ink2);font-size:14px">Niveles no disponibles.</p>`;
 
   const ne = w.catalysts && w.catalysts.next_earnings;
-  const catBlock = ne ? `<ul class="wl"><li><span>Próximo earnings</span><b>${ne.date}</b></li>
-      ${ne.eps_est != null ? `<li><span>EPS estimado</span><b>$${ne.eps_est}</b></li>` : ''}</ul>` :
-    `<div class="brief-note">Sin fecha de earnings próxima disponible.</div>`;
+  const catBlock = ne ? `<div class="cat-big">${ne.date}</div>
+      <div class="brief-note">Próximo reporte de resultados${ne.eps_est != null ? ` · EPS est. $${ne.eps_est}` : ''}</div>` :
+    `<div class="brief-note">Sin fecha de earnings próxima.</div>`;
 
-  const ins = w.insiders || [];
-  const insBlock = ins.length ? `<ul class="wl">${ins.map(i =>
-      `<li><span>${i.name || 'Insider'} · ${i.date || ''}</span>
-        <span class="${i.side === 'compra' ? 'ins-buy' : 'ins-sell'}">${i.side === 'compra' ? 'COMPRA' : 'VENTA'} ${money(i.value, 0)}</span></li>`).join('')}</ul>` :
-    `<div class="brief-note">Sin transacciones de insiders sobre $1M.</div>`;
+  // Insiders → barra neta compra vs venta
+  const fl = w.insiders_flow || {buy_usd: 0, sell_usd: 0, net_usd: 0};
+  const tot = fl.buy_usd + fl.sell_usd;
+  let insBlock;
+  if (tot > 0) {
+    const bw = (fl.buy_usd / tot * 100).toFixed(1), sw = (fl.sell_usd / tot * 100).toFixed(1);
+    const netSide = fl.net_usd >= 0 ? 'compra' : 'venta';
+    insBlock = `<div class="netbar">
+        <i class="buy" style="width:${bw}%" title="Compras ${fmtUSD(fl.buy_usd)}"></i>
+        <i class="sell" style="width:${sw}%" title="Ventas ${fmtUSD(fl.sell_usd)}"></i></div>
+      <div class="netlegend"><span class="ins-buy">▲ compras ${fmtUSD(fl.buy_usd)}</span>
+        <span class="ins-sell">ventas ${fmtUSD(fl.sell_usd)} ▼</span></div>
+      <div class="brief-note">Neto: <b class="${fl.net_usd >= 0 ? 'ins-buy' : 'ins-sell'}">${netSide} ${fmtUSD(Math.abs(fl.net_usd))}</b> (Forms 4)</div>`;
+  } else {
+    insBlock = `<div class="brief-note">Sin compras/ventas de insiders en el mercado abierto.</div>`;
+  }
 
   const risks = w.risks || [];
   const riskBlock = risks.length ? `<ul class="wl risk">${risks.map(r => `<li><span>${r}</span></li>`).join('')}</ul>` :
-    `<div class="brief-note">Sin banderas de riesgo materiales en los datos.</div>`;
+    `<div class="okflag">✓ Sin banderas de riesgo materiales</div>`;
 
   const watchCol = `<div class="brief-col full">
     <div class="bh">Puntos clave a vigilar</div>
     <div class="brief-grid">
-      <div class="brief-col"><div class="bh" style="font-size:12px">Niveles de precio</div>${levelsBlock}</div>
-      <div class="brief-col"><div class="bh" style="font-size:12px">Próximos catalizadores</div>${catBlock}</div>
-      <div class="brief-col"><div class="bh" style="font-size:12px">Insiders &gt; $1M (Forms 4)</div>${insBlock}</div>
-      <div class="brief-col"><div class="bh" style="font-size:12px">Riesgos / rompe-tesis</div>${riskBlock}</div>
+      <div class="brief-col"><div class="bh sm">Niveles de precio</div>${levelsBlock}</div>
+      <div class="brief-col"><div class="bh sm">Próximo catalizador</div>${catBlock}</div>
+      <div class="brief-col"><div class="bh sm">Insiders (Forms 4)</div>${insBlock}</div>
+      <div class="brief-col"><div class="bh sm">Riesgos / rompe-tesis</div>${riskBlock}</div>
     </div></div>`;
 
   return `<h2>Lectura para el inversionista</h2>
-    <div class="sub">Qué significa el puntaje, probabilidad hacia el precio y qué observar</div>
+    <div class="sub">De un vistazo: el veredicto, dónde podría ir el precio y qué observar</div>
     <div class="brief-grid" style="margin-top:16px">${interpCol}${probCol}${watchCol}</div>`;
 }
 
