@@ -73,3 +73,4 @@ class SpecialistOutput(BaseModel):
     validation_tests: dict[str, int] = Field(
         default_factory=lambda: {"passed": 0, "failed": 0, "warnings": 0}
     )
+    output_hash: str = ""

@@ -113,6 +113,10 @@ class ValuationOutput(SpecialistOutput):
 
 def run(packet, beta: float | None = None, erp: float = DEFAULT_ERP, overlay: dict | None = None) -> ValuationOutput:
     overlay = overlay or {}
+    beta_erp_answer = overlay.get("beta_and_erp")
+    if beta is None and isinstance(beta_erp_answer, dict):
+        beta = beta_erp_answer.get("beta")
+        erp = beta_erp_answer.get("erp", erp)
     annual = packet.fundamentals.get("annual", [])
     facts = packet.facts_table
 
