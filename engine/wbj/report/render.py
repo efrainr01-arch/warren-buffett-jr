@@ -252,7 +252,12 @@ def render(final: FinalReport, charts: dict[str, Path], out_dir: Path) -> Path:
         lines.append("## Charts")
         lines.append("")
         for name, path in charts.items():
-            lines.append(f"- {name}: `{path}`")
+            path = Path(path)
+            try:
+                shown = path.relative_to(out_dir)
+            except ValueError:
+                shown = path.name  # not under out_dir -- avoid leaking an unrelated absolute path
+            lines.append(f"- {name}: `{shown}`")
         lines.append("")
 
     md_text = "\n".join(lines)

@@ -74,7 +74,27 @@ Desde esta carpeta, abre Claude Code y pide un análisis:
 Analiza NVDA
 ```
 
-El orquestador armará el packet de datos, correrá los 6 especialistas en paralelo, aplicará gates y overrides, y entregará el reporte final con niveles de confirmación/invalidación y trail de auditoría. *(El motor Python completo — indicadores técnicos, DCF institucional, los 6 especialistas — está en construcción: ver `RESUME.md`.)*
+El orquestador armará el packet de datos, correrá los 6 especialistas en paralelo, aplicará gates y overrides, y entregará el reporte final con niveles de confirmación/invalidación y trail de auditoría.
+
+## Motor completo (`wbj engine`)
+
+El motor Python completo — indicadores técnicos, niveles importantes, DCF
+institucional, los 6 especialistas con las ~200 fórmulas del Cerebro,
+overlay de juicio, agregación con gates/overrides, gráficas y reporte
+final auditable — ya está implementado y probado (220+ tests). Vive bajo
+un namespace de comandos separado del MVP de arriba, para no romper
+ninguno de los dos:
+
+```bash
+cd engine
+wbj engine analyze NVDA --beta 1.3   # packet -> 6 especialistas -> agregación -> reporte
+```
+
+Necesita las claves de FMP/FinnHub/FRED en `API/.env` para datos en vivo
+completos (sin ellas, las métricas afectadas quedan `MISSING`/
+`NOT_SCORABLE` en vez de inventarse un número). Ver
+[`engine/README.md`](engine/README.md) para instalación, uso por etapas,
+el flujo de overlay de juicio, y modo offline.
 
 ## Perfil del inversionista (resumen)
 

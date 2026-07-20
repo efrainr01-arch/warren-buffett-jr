@@ -285,7 +285,12 @@ def build_packet(ticker: str, providers: Providers, now: datetime) -> Packet:
         staleness["quarterly_fundamentals"] = staleness_state("quarterly_fundamentals", q_age)
 
     earnings_calendar = providers.fmp.earnings_calendar(ticker) or []
-    actual_prints = [row for row in earnings_calendar if row.get("eps") is not None]
+    # "eps" is the legacy v3 field name for the actual print; the current
+    # stable API calls it "epsActual" (Task 25 live-smoke-test finding).
+    actual_prints = [
+        row for row in earnings_calendar
+        if row.get("eps") is not None or row.get("epsActual") is not None
+    ]
     if actual_prints:
         latest_print_date = max(row["date"] for row in actual_prints)
         consensus_age = (today - date.fromisoformat(latest_print_date)).days
@@ -299,7 +304,9 @@ def build_packet(ticker: str, providers: Providers, now: datetime) -> Packet:
 
     security = Security(
         ticker=ticker,
-        exchange=profile.get("exchangeShortName") or "UNKNOWN",
+        # "exchangeShortName" is the legacy v3 field name; the stable API
+        # calls it "exchange" (Task 25 live-smoke-test finding).
+        exchange=profile.get("exchangeShortName") or profile.get("exchange") or "UNKNOWN",
         security_type=DEFAULT_SECURITY_TYPE,
         reporting_currency=currency,
         valuation_currency=currency,
