@@ -33,13 +33,17 @@ class CategoryScore(BaseModel):
 
 
 class ExecutiveThesis(BaseModel):
-    """The seven required executive-summary sentences (FINAL_REPORT_SCHEMA.md)."""
+    """The seven required executive-summary sentences, per root CLAUDE.md's
+    "Contenido obligatorio del reporte final" #1 (one field per sentence,
+    in order)."""
 
-    business_quality: str
-    growth_engine: str
+    what_the_company_does: str
+    value_creation_durability: str
+    growth_funding: str
     market_validation: str
-    valuation_message: str
-    primary_risk: str
+    price_implied_assumptions: str
+    nearest_levels: str
+    primary_invalidation_risk: str
 
 
 class FinalReport(BaseModel):
@@ -51,6 +55,9 @@ class FinalReport(BaseModel):
     important_levels: list[dict] = Field(default_factory=list)
     valuation_scenarios: list[dict] = Field(default_factory=list)
     reverse_dcf: dict[str, Any] = Field(default_factory=dict)
+    notable_holders: list[dict] = Field(default_factory=list)
+    management_track_record: list[str] = Field(default_factory=list)
+    insider_trades: list[dict] = Field(default_factory=list)
     thesis_killers: list[dict] = Field(default_factory=list)
     monitoring_triggers: list[dict] = Field(default_factory=list)
     missing_or_conflicted_data: list[str] = Field(default_factory=list)
