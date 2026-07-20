@@ -43,10 +43,12 @@ class Provider:
         settings: Any,
         cache: Cache,
         client: httpx.Client | None = None,
+        offline: bool = False,
     ) -> None:
         self.settings = settings
         self.cache = cache
         self.client = client if client is not None else httpx.Client()
+        self.offline = offline
 
     def _sleep(self, seconds: float) -> None:
         """Sleep for `seconds`. Isolated so tests can monkeypatch it out."""
@@ -75,8 +77,16 @@ class Provider:
         `headers`, if given, is passed through to the underlying request
         (e.g. a required `User-Agent` per SEC EDGAR's fair-access policy).
         Existing callers that don't pass `headers` are unaffected.
+
+        When `self.offline` is set (constructor `offline=True`, per the
+        CLI's `--offline` flag), the network is never touched at all:
+        any cache entry is returned regardless of `max_age_days`
+        freshness, and a cache miss returns `None` immediately rather
+        than falling through to a live request.
         """
         age = self.cache.age_days(ticker, cache_key)
+        if self.offline:
+            return self.cache.get(ticker, cache_key) if age is not None else None
         if age is not None and (max_age_days is None or age <= max_age_days):
             return self.cache.get(ticker, cache_key)
 

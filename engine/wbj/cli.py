@@ -24,6 +24,18 @@ from wbj.quick import quick_scorecard
 
 app = typer.Typer()
 
+# Task 24: the full staged Cerebro engine (packet builder -> 6
+# specialists -> aggregation -> charts -> report) lives under `wbj
+# engine ...` rather than replacing the top-level fetch/packet/compute/
+# analyze commands above. Those top-level commands are the zero-API-key
+# MVP (EDGAR-only) that scripts/webapp.py imports `_build_packet`/
+# `_compute` from directly and that README.md's "Inicio rápido" documents
+# as the no-keys quick start -- repointing them would silently break both.
+# See RESUME.md's "Task 24 conflict" note; `engine` is this session's
+# resolution, kept separate and fully additive.
+engine_app = typer.Typer(help="Full staged Cerebro engine (needs FMP/FinnHub/FRED API keys for live data).")
+app.add_typer(engine_app, name="engine")
+
 # Concept tags to try, in preference order, per us-gaap taxonomy drift.
 _REVENUE_TAGS = [
     "RevenueFromContractWithCustomerExcludingAssessedTax",
@@ -301,18 +313,75 @@ def screen(limit: int = 15) -> None:
         )
 
 
-@app.command()
-def aggregate(ticker: str) -> None:
-    """Aggregate specialist outputs for a ticker."""
-    typer.echo(f"aggregate {ticker}: not implemented")
-    raise typer.Exit(1)
+@engine_app.command("fetch")
+def engine_fetch(ticker: str) -> None:
+    """Warm the provider cache for a ticker (FMP/EDGAR/FinnHub/FRED)."""
+    from wbj import pipeline
+
+    settings = load_settings()
+    pipeline.stage_fetch(ticker, settings)
+    typer.echo(f"{ticker.upper()}: cache warmed")
 
 
-@app.command()
-def report(ticker: str) -> None:
-    """Generate report for a ticker."""
-    typer.echo(f"report {ticker}: not implemented")
-    raise typer.Exit(1)
+@engine_app.command("packet")
+def engine_packet(ticker: str, offline: bool = False) -> None:
+    """Build and cache the full analysis packet for a ticker."""
+    from wbj import pipeline
+
+    settings = load_settings()
+    p = pipeline.stage_packet(ticker, settings, offline=offline)
+    typer.echo(f"packet -> {settings.cache_dir / p.security.ticker / 'artifacts' / 'packet.json'} (hash {p.packet_hash[:12]}...)")
+
+
+@engine_app.command("compute")
+def engine_compute(ticker: str, offline: bool = False, beta: float = None) -> None:
+    """Build the packet and run the six specialists."""
+    from wbj import pipeline
+
+    settings = load_settings()
+    p = pipeline.stage_packet(ticker, settings, offline=offline)
+    outputs = pipeline.stage_compute(p, settings, beta=beta)
+    for agent_id, out in outputs.items():
+        typer.echo(f"{agent_id}: {out.category.awarded_points}/{out.category.max_points} pts (coverage {out.coverage:.0%})")
+
+
+@engine_app.command("aggregate")
+def engine_aggregate(ticker: str, offline: bool = False, beta: float = None, overlay: str = None) -> None:
+    """Build the packet, run the specialists, and aggregate into a profile."""
+    from wbj import pipeline
+
+    settings = load_settings()
+    p = pipeline.stage_packet(ticker, settings, offline=offline)
+    outputs = pipeline.stage_compute(p, settings, beta=beta)
+    final = pipeline.stage_aggregate(p, outputs, overlay_path=Path(overlay) if overlay else None)
+    typer.echo(f"{ticker.upper()}: {final.profile.label} (raw {final.profile.raw_score:.1f}/100, confidence {final.profile.total_confidence:.1f}/100)")
+
+
+@engine_app.command("report")
+def engine_report(ticker: str, offline: bool = False, beta: float = None, overlay: str = None) -> None:
+    """Full pipeline: packet -> compute -> aggregate -> charts + report.md/report.json."""
+    from wbj import pipeline
+    from datetime import datetime, timezone
+
+    settings = load_settings()
+    now = datetime.now(timezone.utc)
+    p = pipeline.stage_packet(ticker, settings, offline=offline, now=now)
+    outputs = pipeline.stage_compute(p, settings, beta=beta)
+    final = pipeline.stage_aggregate(p, outputs, overlay_path=Path(overlay) if overlay else None)
+    out_dir = settings.reports_dir / p.security.ticker / now.date().isoformat()
+    pipeline.stage_report(p, outputs, final, out_dir)
+    typer.echo(f"report -> {out_dir}/report.md")
+
+
+@engine_app.command("analyze")
+def engine_analyze(ticker: str, offline: bool = False, beta: float = None, overlay: str = None) -> None:
+    """Run the full staged pipeline end to end (fetch/packet/compute/aggregate/report)."""
+    from wbj import pipeline
+
+    settings = load_settings()
+    final = pipeline.run_all(ticker, settings, offline=offline, beta=beta, overlay_path=Path(overlay) if overlay else None)
+    typer.echo(f"{ticker.upper()}: {final.profile.label} (raw {final.profile.raw_score:.1f}/100)")
+    typer.echo(f"Saved: {settings.reports_dir / final.security.ticker}")
 
 
 if __name__ == "__main__":

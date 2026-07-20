@@ -1,0 +1,344 @@
+{
+  "audit": {
+    "formula_versions": [
+      "BUS-CAGR-006",
+      "BUS-DIL-028",
+      "BUS-FCFC-017",
+      "BUS-IROIC-016",
+      "BUS-RANGE-010",
+      "BUS-ROIC-013",
+      "BUS-SBC-030",
+      "BUS-STAB-009",
+      "FIN-BS-017",
+      "FIN-BS-018",
+      "FIN-BS-019",
+      "FIN-BS-020",
+      "FIN-BS-021",
+      "FIN-BS-022",
+      "FIN-CF-012",
+      "FIN-CF-013",
+      "FIN-CF-014",
+      "FIN-CF-015",
+      "FIN-CF-016",
+      "FIN-EF-023",
+      "FIN-EF-024",
+      "FIN-EF-025",
+      "FIN-EF-026",
+      "FIN-EF-027",
+      "FIN-GR-001",
+      "FIN-GR-002",
+      "FIN-GR-003",
+      "FIN-GR-004",
+      "FIN-GR-005",
+      "FIN-PR-006",
+      "FIN-PR-007",
+      "FIN-PR-008",
+      "FIN-PR-009",
+      "FIN-PR-010",
+      "FIN-PR-011",
+      "MKT-DISP-013",
+      "MKT-GCAP-009",
+      "MKT-INCM-018",
+      "MKT-OPLEV-017",
+      "MKT-SURP-014",
+      "RSK-ACCR-020",
+      "RSK-ICOV-011",
+      "RSK-MDD-006",
+      "RSK-VOL-001",
+      "TECH-52W-036",
+      "TECH-ATR-006",
+      "TECH-DMI-009",
+      "TECH-LIQ-040",
+      "TECH-RSI-007",
+      "TECH-SMA-002",
+      "TECH-VOL-018",
+      "VAL-MOS-040",
+      "VAL-PS-016",
+      "VAL-WACC-007"
+    ],
+    "packet_hashes": {
+      "NVDA": "69d3039ffdd1e379a169ac11c0ea1eb9207e78a9d8ff2c68d78114dcc63c4ade"
+    },
+    "validation_summary": {
+      "failed": 0,
+      "passed": 6
+    }
+  },
+  "category_scorecard": {
+    "business": {
+      "confidence": 100.0,
+      "max": 20.0,
+      "points": 8.25
+    },
+    "financial": {
+      "confidence": 78.95238095238093,
+      "max": 15.0,
+      "points": 9.4
+    },
+    "market": {
+      "confidence": 100.0,
+      "max": 20.0,
+      "points": 7.1000000000000005
+    },
+    "risk": {
+      "confidence": 100.0,
+      "max": 15.0,
+      "points": 2.019146614484941
+    },
+    "technical": {
+      "confidence": 100.0,
+      "max": 20.0,
+      "points": 8.149999999999999
+    },
+    "valuation": {
+      "confidence": 100.0,
+      "max": 10.0,
+      "points": 3.1299814488331847
+    }
+  },
+  "executive_thesis": {
+    "growth_funding": "Growth appears self-funded from operating cash flow.",
+    "market_validation": "Recent earnings surprises average +8.0%, a supportive market signal.",
+    "nearest_levels": "Base intrinsic-value reference is 163.97; see the important-levels table for nearby technical zones.",
+    "price_implied_assumptions": "The current price appears to require roughly 56.8% revenue CAGR.",
+    "primary_invalidation_risk": "No single dominant deterministic risk flag was raised; see thesis killers for judgment-based risks.",
+    "value_creation_durability": "ROIC is 112.2% against an estimated WACC of 12.0% (spread +100.2%), supporting durable value creation.",
+    "what_the_company_does": "NVDA is analyzed as a operating company under the default_nonfinancial adapter."
+  },
+  "important_levels": [
+    {
+      "confluence": false,
+      "distance_atr": -28.92724474246678,
+      "distance_percent": -0.3654522821576764,
+      "label": "sma20",
+      "source": "technical",
+      "type": "moving_average",
+      "value": 76.463
+    },
+    {
+      "confluence": false,
+      "distance_atr": -29.59647918040817,
+      "distance_percent": -0.37390705394190876,
+      "label": "sma50",
+      "source": "technical",
+      "type": "moving_average",
+      "value": 75.4442
+    },
+    {
+      "confluence": false,
+      "distance_atr": -30.686382772312726,
+      "distance_percent": -0.3876763485477179,
+      "label": "sma100",
+      "source": "technical",
+      "type": "moving_average",
+      "value": 73.785
+    },
+    {
+      "confluence": false,
+      "distance_atr": -32.77104016388017,
+      "distance_percent": -0.41401286307053947,
+      "label": "sma200",
+      "source": "technical",
+      "type": "moving_average",
+      "value": 70.61144999999999
+    },
+    {
+      "confluence": false,
+      "distance_atr": -7.560935223783578,
+      "distance_percent": -0.09552105834405994,
+      "label": "bear",
+      "source": "valuation",
+      "type": "intrinsic_value_reference",
+      "value": 108.98971246954078
+    },
+    {
+      "confluence": false,
+      "distance_atr": 28.55364981332844,
+      "distance_percent": 0.3607324714507927,
+      "label": "base",
+      "source": "valuation",
+      "type": "intrinsic_value_reference",
+      "value": 163.96826280982052
+    },
+    {
+      "confluence": false,
+      "distance_atr": 71.24709742861678,
+      "distance_percent": 0.9001000470042684,
+      "label": "bull",
+      "source": "valuation",
+      "type": "intrinsic_value_reference",
+      "value": 228.96205566401434
+    },
+    {
+      "confluence": false,
+      "distance_atr": 12.397405967368934,
+      "distance_percent": 0.15662260073317372,
+      "label": "margin_of_safety_15pct",
+      "source": "valuation",
+      "type": "intrinsic_value_reference",
+      "value": 139.37302338834743
+    },
+    {
+      "confluence": false,
+      "distance_atr": 1.6265767367292643,
+      "distance_percent": 0.020549353588094437,
+      "label": "margin_of_safety_25pct",
+      "source": "valuation",
+      "type": "intrinsic_value_reference",
+      "value": 122.97619710736538
+    },
+    {
+      "confluence": false,
+      "distance_atr": 0.0,
+      "distance_percent": 0.0,
+      "source": "market",
+      "type": "current_price",
+      "value": 120.5
+    }
+  ],
+  "insider_trades": [
+    {
+      "acceptedDate": "2026-06-10 18:02:00",
+      "filingDate": "2026-06-10",
+      "formType": "4",
+      "link": "https://www.sec.gov/Archives/edgar/data/0001045810/000104581026000123/xslF345X03/wf-form4.xml",
+      "price": 118.45,
+      "reportingName": "Huang Jen-Hsun",
+      "securitiesOwned": 860000000,
+      "securitiesTransacted": 120000,
+      "symbol": "NVDA",
+      "transactionDate": "2026-06-08",
+      "transactionType": "S-Sale"
+    },
+    {
+      "acceptedDate": "2026-05-02 17:40:00",
+      "filingDate": "2026-05-02",
+      "formType": "4",
+      "link": "https://www.sec.gov/Archives/edgar/data/0001045810/000104581026000098/xslF345X03/wf-form4.xml",
+      "price": 112.3,
+      "reportingName": "Kress Colette",
+      "securitiesOwned": 210000,
+      "securitiesTransacted": 45000,
+      "symbol": "NVDA",
+      "transactionDate": "2026-04-30",
+      "transactionType": "S-Sale"
+    }
+  ],
+  "management_track_record": [],
+  "missing_or_conflicted_data": [
+    "ASSUMPTION (evidence class A): interest expense not in packet; assumed interest coverage 10.0x for synthetic cost of debt",
+    "net_profit_status, profit_vs_revenue_growth, fcf_growth, cash_vs_earnings, debt_vs_revenue_trend, and liquidity_trend use disclosed bands not given numerically in FORMULAS.md (see module docstring)",
+    "MAIN_RECONCILE_WARNING: weighted score 6.27 vs core-27 score 8.81 differ by more than 1.5",
+    "competitive_position and customer_economics dimensions require peer/market-share and subscription-cohort data not present in this packet; correctly NOT_SCORABLE rather than imputed",
+    "TAM/SAM/SOM, peer market share, and revision-breadth history are not in this packet (market_share is a prohibited-imputation metric) \u2014 TAM is a judgment request, market share and revision breadth are NOT_SCORABLE.",
+    "Relative strength and sector breadth require benchmark/sector series not populated by the Task-10 packet builder yet -- correctly NOT_SCORABLE / partial rather than imputed.",
+    "Beta/downside beta need a benchmark series not populated by the Task-10 packet builder yet -- correctly MISSING, never proxied. Concentration and the regulatory event registry are judgment requests; customer_concentration is a prohibited-imputation metric."
+  ],
+  "monitoring_triggers": [
+    {
+      "reason": "gate/override-driven avoid classification -- default policy revisit window",
+      "revisit_event": "next quarterly earnings release, or 90 days, whichever comes first"
+    }
+  ],
+  "notable_holders": [
+    {
+      "change": 12500000,
+      "dateReported": "2026-03-31",
+      "holder": "Vanguard Group Inc",
+      "shares": 1580000000,
+      "symbol": "NVDA"
+    },
+    {
+      "change": -3200000,
+      "dateReported": "2026-03-31",
+      "holder": "BlackRock Inc",
+      "shares": 1340000000,
+      "symbol": "NVDA"
+    }
+  ],
+  "profile": {
+    "failed_gates": [
+      {
+        "gate": "Momentum Candidate",
+        "reasons": [
+          "raw_total<78",
+          "technical<17",
+          "market<16",
+          "business+financial<28",
+          "risk<8"
+        ]
+      },
+      {
+        "gate": "Quality Opportunity",
+        "reasons": [
+          "raw_total<80",
+          "business<16",
+          "financial<11",
+          "risk<10",
+          "valuation<5",
+          "technical<12"
+        ]
+      },
+      {
+        "gate": "Value Opportunity",
+        "reasons": [
+          "raw_total<75",
+          "valuation<8",
+          "business<13",
+          "risk<10",
+          "technical<9"
+        ]
+      }
+    ],
+    "label": "Avoid/Wait",
+    "overrides": [
+      "risk_override"
+    ],
+    "passed_gates": [],
+    "raw_score": 38.04912806331812,
+    "total_confidence": 96.84285714285714
+  },
+  "report_version": "2.0.0",
+  "reverse_dcf": {
+    "current_price": 120.5,
+    "implied_margin": 0.3933696925518027,
+    "implied_revenue_cagr": 0.567576585061178
+  },
+  "security": {
+    "analysis_timestamp": "2026-07-20T23:03:50.722867+00:00",
+    "currency": "USD",
+    "exchange": "NASDAQ",
+    "knowledge_timestamp": "2026-07-16T21:00:00+00:00",
+    "ticker": "NVDA"
+  },
+  "thesis_killers": [],
+  "valuation_scenarios": [
+    {
+      "growth": 0.6225675679020932,
+      "label": "Bear",
+      "margin": 0.3733696925518027,
+      "probability": 0.25,
+      "tv_growth": 0.02,
+      "value": 108.98971246954078,
+      "wacc": 0.1296467889951192
+    },
+    {
+      "growth": 0.6725675679020933,
+      "label": "Base",
+      "margin": 0.3933696925518027,
+      "probability": 0.5,
+      "tv_growth": 0.03,
+      "value": 163.96826280982052,
+      "wacc": 0.11964678899511919
+    },
+    {
+      "growth": 0.7225675679020933,
+      "label": "Bull",
+      "margin": 0.4133696925518027,
+      "probability": 0.25,
+      "tv_growth": 0.03,
+      "value": 228.96205566401434,
+      "wacc": 0.10964678899511919
+    }
+  ]
+}
