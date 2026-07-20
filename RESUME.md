@@ -1,26 +1,71 @@
 # Resume Point — wbj Compute Engine Build
 
-**Last session:** 2026-07-16 · **Branch:** `feature/wbj-engine` · **Status:** paused mid-plan (9.5 / 25 tasks)
+**Status: COMPLETE.** All 25 tasks of `docs/superpowers/plans/2026-07-16-wbj-engine.md`
+are implemented, tested, and committed to `main`. Last build session: 2026-07-20.
 
-## To resume (next Claude Code session)
+## What's here
 
-Open a session in this folder and say:
+- **Phase 1 (Foundations):** package scaffold, `Value` null-state type, formula
+  registry, scoring engine, confidence engine.
+- **Phase 2 (Data layer):** response cache, resilient provider base (with an
+  `offline` cache-only mode), FMP (`/stable` API), SEC EDGAR, FinnHub, and FRED
+  providers, plus the packet builder (canonical field mapping, source-hierarchy
+  reconciliation, staleness, hashing).
+- **Phase 3 (Math engines):** technical indicators (Wilder ATR/RSI/ADX, MACD,
+  composite RS), the important-levels engine (pivots, zones, strength,
+  breakouts, AVWAP, volume profile, earnings gaps), and the institutional
+  valuation engine (DCF, WACC, reverse DCF, scenarios, Monte Carlo, ensemble).
+- **Phase 4 (Specialists):** all six — Financial, Business, Market & Growth,
+  Technical & Momentum, Risk & Resilience, Valuation — each scoring against the
+  Cerebro formula registry with a shared output envelope.
+- **Phase 5 (Assembly):** the judgment overlay (answers qualitative
+  `judgment_requests` and re-scores), aggregation (7 mandatory overrides, the
+  three profile gates, contradiction detection, price-level synthesis), report
+  charts, the final-report renderer (md + json), and the staged CLI pipeline
+  (`wbj engine fetch|packet|compute|aggregate|report|analyze`).
 
-> Resume the wbj engine build. Read `.superpowers/sdd/progress.md` (the ledger) and continue subagent-driven-development of `docs/superpowers/plans/2026-07-16-wbj-engine.md` from Task 10.
+**381 tests, all offline/deterministic.** Golden fixtures:
+`engine/tests/fixtures/packet/NVDA_packet.json` (packet builder) and
+`engine/tests/fixtures/golden/NVDA_report.json` (full pipeline).
 
-The ledger + `git log` are the source of truth for what's done. Tasks 1–9 are complete and reviewed — do NOT redo them.
+**Live-verified:** `wbj engine analyze NVDA` run live against real SEC EDGAR +
+FMP data (2026-07-20). See `engine/README.md` for install/usage and the
+Task-25 commit for the live-API fixes that came out of that run (FMP's
+`/api/v3` → `/stable` migration, tier-driven `limit` caps, a couple of
+renamed fields).
 
-## Current state
+## Documented deviations from the original plan/Cerebro text
 
-- **Done (committed, reviewed):** Tasks 1–9 — scaffold, Value null-states, formula registry, scoring engine, confidence engine, cache/provider base, FMP + EDGAR + FinnHub + FRED providers, reconciliation. 160 tests.
-- **In progress:** Task 10 (packet builder). Tests, staleness, schemas, fixture script exist (WIP commit `ff5a0c4`); **`engine/wbj/packet/builder.py` does not exist yet** → `pytest tests/packet` fails collection. Until it lands: `cd engine && .venv/bin/python -m pytest tests/ --ignore=tests/packet` (146 pass).
-- **Remaining:** Tasks 10–25 (indicators, levels engine, valuation engine, 6 specialists, overlay, aggregation/gates, charts, renderer, CLI wiring, live smoke test).
-- **Bonus (not in plan):** working MVP — `engine/.venv/bin/wbj analyze AAPL` runs an EDGAR-based Financial-category analysis and saves to `Reportes/<T>/<date>/`. Also `engine/scripts/dashboard.py`, `webapp.py` (unreviewed, from a parallel session).
+Each is noted inline in its module's docstring and its commit message; the
+short version:
 
-## Open decisions / warnings
+- `relative_strength()` uses Cerebro's literal excess-return definition, not
+  the plan's parenthetical "(ratio of n-day returns)".
+- Several Financial/Business/Market/Risk formulas that Cerebro describes only
+  qualitatively (no numeric band) use a disclosed, documented threshold
+  instead — flagged in each module's `assumptions` output.
+- The judgment overlay re-runs `specialist.run(packet, overlay=...)` rather
+  than patching a frozen output via a `rescore()` method.
+- The full engine lives under `wbj engine <stage>`, not the top-level
+  `wbj analyze` — that name was already the zero-API-key MVP's entry point
+  (`scripts/webapp.py` imports from it directly, and README.md documents it
+  as the no-keys quick start). Keeping both avoided breaking either.
+- Industry adapters (bank/insurer/REIT/etc.) are out of scope, per the plan's
+  own exclusions list — the engine covers the "mature non-financial company"
+  path only; other security types get `ADAPTER_UNSUPPORTED` in Valuation's
+  model selection.
 
-1. **Task 24 conflict:** the MVP lives in `engine/wbj/cli.py`; the plan's Task 24 wires the full staged pipeline into the same file. Ask Victor: merge (e.g., keep MVP as `wbj quick <T>`) or replace.
-2. **FMP key returns 403** on `/api/v3/profile` (plan limitation?). Check the FMP subscription before Task 25's live smoke test. EDGAR path works without any key.
-3. Speed preference: Victor asked to batch remaining tasks — batch the six specialists (14–19) under one implementer + one review; keep individual review gates on Tasks 10, 12, 13, 21.
-4. Deferred Minor review findings are listed per-task in `.superpowers/sdd/progress.md` — feed them to the final whole-branch review.
-5. Git identity is auto-generated; run `git config --global user.email victor@infusioninvestments.com` before pushing anywhere.
+## If you pick this up again
+
+Natural next steps, none of them blocking:
+
+1. Get FinnHub + FRED API keys (both free) into `API/.env` for full
+   consensus-estimate and WACC coverage on live runs.
+2. `wbj/providers/fmp.py`'s `institutional_holders`/`insider_trades` endpoint
+   paths are best-effort guesses at the `/stable` API shape (this FMP account
+   tier returns 402 for both, so they were never confirmed against a real
+   response) — worth double-checking against FMP's docs if a higher-tier key
+   becomes available.
+3. `market_data.benchmark`/`market_data.sector` are never populated by the
+   packet builder, so Relative Strength and sector-breadth scoring are
+   permanently `NOT_SCORABLE` until that's wired up.
