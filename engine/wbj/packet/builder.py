@@ -251,8 +251,30 @@ def build_packet(ticker: str, providers: Providers, now: datetime) -> Packet:
         if latest_annual_date
         else None
     )
+    # Task-25 live-smoke-test finding: FMP's "totalDebt" includes ASC-842
+    # operating-lease liabilities; EDGAR's LongTermDebtNoncurrent+DebtCurrent
+    # alone does not, which was producing a spurious >5% CONFLICTED verdict
+    # on a genuinely reconcilable figure. Post-2019 GAAP filers book the
+    # lease liability's present value directly on the balance sheet
+    # (OperatingLeaseLiability{Noncurrent,Current}), so no separate PV-of-
+    # payments calculation (VAL-LEASE-004) is needed here -- just add it in,
+    # per Cerebro/00_main_agent/DECISION_RULES.md "Include leases as debt
+    # when operating earnings are adjusted for leases." Absent for pre-842
+    # filers or non-lessees, in which case it contributes 0.
+    edgar_lease_noncurrent = (
+        _edgar_fact_at(companyfacts, "us-gaap", "OperatingLeaseLiabilityNoncurrent", "USD", latest_annual_date)
+        if latest_annual_date
+        else None
+    )
+    edgar_lease_current = (
+        _edgar_fact_at(companyfacts, "us-gaap", "OperatingLeaseLiabilityCurrent", "USD", latest_annual_date)
+        if latest_annual_date
+        else None
+    )
     edgar_total_debt = (
-        edgar_lt_debt + edgar_st_debt if edgar_lt_debt is not None and edgar_st_debt is not None else None
+        edgar_lt_debt + edgar_st_debt + (edgar_lease_noncurrent or 0) + (edgar_lease_current or 0)
+        if edgar_lt_debt is not None and edgar_st_debt is not None
+        else None
     )
 
     fmp_revenue = annual[0].get("revenue") if annual else None
