@@ -222,13 +222,30 @@ def _edgar_total_debt(companyfacts: dict, target_date: str | None) -> Value:
     """EDGAR has no single "total debt" tag; sum the noncurrent + current
     debt tags for the target period. If either half is unavailable, the
     sum isn't safe to report — return MISSING rather than silently
-    treating a missing half as zero."""
+    treating a missing half as zero.
+
+    FMP's "totalDebt" aggregate includes ASC-842 operating-lease
+    liabilities; post-2019 GAAP filers book the lease liability's present
+    value directly on the balance sheet (OperatingLeaseLiability{Noncurrent,
+    Current}), so add those in too or a genuinely reconcilable figure
+    surfaces as a spurious CONFLICTED verdict (per Cerebro/00_main_agent/
+    DECISION_RULES.md "Include leases as debt when operating earnings are
+    adjusted for leases"). Missing for pre-842 filers or non-lessees, in
+    which case it contributes 0.
+    """
     long_term = _edgar_value_at(companyfacts, "us-gaap", "LongTermDebtNoncurrent", "USD", target_date)
     current = _edgar_value_at(companyfacts, "us-gaap", "DebtCurrent", "USD", target_date)
     if long_term.is_null or current.is_null:
         return Value.null(NullState.MISSING, unit="USD", source_name="EDGAR")
+    lease_noncurrent = _edgar_value_at(
+        companyfacts, "us-gaap", "OperatingLeaseLiabilityNoncurrent", "USD", target_date
+    )
+    lease_current = _edgar_value_at(companyfacts, "us-gaap", "OperatingLeaseLiabilityCurrent", "USD", target_date)
+    lease_total = (0 if lease_noncurrent.is_null else lease_noncurrent.value) + (
+        0 if lease_current.is_null else lease_current.value
+    )
     return Value.of(
-        long_term.value + current.value,
+        long_term.value + current.value + lease_total,
         unit="USD",
         source_name="EDGAR",
         period=target_date,

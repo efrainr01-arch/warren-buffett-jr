@@ -290,6 +290,43 @@ def test_facts_table_total_debt_reconciled(fake_providers, fixed_now):
     assert total_debt.value == 9710000000
 
 
+def test_facts_table_total_debt_includes_edgar_operating_lease_liability(fixed_now):
+    """Task-25 live-smoke-test finding: FMP's totalDebt includes ASC-842
+    operating-lease liabilities. EDGAR's LongTermDebtNoncurrent+DebtCurrent
+    alone must not be compared against it directly -- that produced a
+    spurious CONFLICTED verdict on NVDA's real filings. EDGAR's own
+    OperatingLeaseLiability{Noncurrent,Current} (present value, already on
+    the balance sheet) must be added in before reconciling."""
+    companyfacts = copy.deepcopy(FakeEdgarProvider()._companyfacts)
+    end = "2025-01-26"  # matches the fixture's latest annual period end
+    companyfacts["facts"]["us-gaap"]["OperatingLeaseLiabilityNoncurrent"] = {
+        "units": {"USD": [{"end": end, "val": 500000000}]}
+    }
+    companyfacts["facts"]["us-gaap"]["OperatingLeaseLiabilityCurrent"] = {
+        "units": {"USD": [{"end": end, "val": 100000000}]}
+    }
+    # 8460M (LT) + 1250M (current) + 500M (lease noncurrent) + 100M (lease current) = 10,310M
+    income_annual_with_lease_matched_debt = copy.deepcopy(FakeFMPProvider()._get("income_annual"))
+    balance_annual_with_lease = copy.deepcopy(FakeFMPProvider()._get("balance_annual"))
+    balance_annual_with_lease[0]["totalDebt"] = 10310000000
+
+    providers = Providers(
+        fmp=FakeFMPProvider(
+            ohlcv=generate_ohlcv_sessions(end=(fixed_now - timedelta(days=1)).date()),
+            overrides={"income_annual": income_annual_with_lease_matched_debt, "balance_annual": balance_annual_with_lease},
+        ),
+        edgar=FakeEdgarProvider(companyfacts=companyfacts),
+        finnhub=FakeFinnhubProvider(),
+        fred=FakeFredProvider(),
+    )
+
+    packet = build_packet("NVDA", providers, fixed_now)
+
+    total_debt = packet.facts_table["total_debt"]
+    assert total_debt.is_valid
+    assert total_debt.value == 10310000000
+
+
 def test_facts_table_price_is_fmp_only(fake_providers, fixed_now):
     packet = build_packet("NVDA", fake_providers, fixed_now)
 
